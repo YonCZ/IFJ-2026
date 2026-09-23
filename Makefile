@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -g
-SRC = $(wildcard *.c)
+CFLAGS = -Wall -Wextra -std=c11 -g -Isrc
+SRC = $(wildcard src/*.c) $(wildcard src/*/*.c)
 OBJ = $(SRC:.c=.o)
 TARGET = compiler
 
