@@ -1,5 +1,6 @@
 # Executables and build objects
 *.o
+compiler
 
 # OS / Editor temporary files
 .DS_Store
