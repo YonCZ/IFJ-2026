@@ -10,6 +10,11 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include "scanner/scanner.h"
+#include "parser/parser.h"
+#include "symtable/symtable.h"
+#include "generator/generator.h"
 
 int main(void) {
     printf("IFJ26 Compiler Initialized\n");
