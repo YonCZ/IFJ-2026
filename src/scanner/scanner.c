@@ -274,7 +274,7 @@ static Token scan_raw(FILE *f) {
                             }
                             //jinak nic neni s @, takze je to lexikalni chyba 1
                             else {
-                                error_exit(ERROR_LEX, current_line, "Neplatny znak @");
+                                error_exit(ERROR_LEX, current_line, "Invalid character @");
                             }
                             break;
                         }
@@ -317,7 +317,7 @@ static Token scan_raw(FILE *f) {
                             break;
                         //jinak je to defaultni chyba neboli lexikalni chyba 1
                         default:
-                            error_exit(ERROR_LEX, current_line, "Neocekavany znak");
+                            error_exit(ERROR_LEX, current_line, "Unexpected character");
                     }
                 }
                 break;
@@ -440,7 +440,7 @@ static Token scan_raw(FILE *f) {
             case BLOCK_COMM_STATE:
                 //pokud je to konec souboru tak je to lexikalni chyba 
                 if(c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Neukonceny blokovy komentar");
+                    error_exit(ERROR_LEX, current_line, "Unterminated block comment");
                 }
                 //pokud je to prazdny radek tak zacian novy radek
                 else if (c == '\n') {
@@ -466,7 +466,7 @@ static Token scan_raw(FILE *f) {
                                 int check;
                                 while ((check = in_fgetc(f)) == ' ' || check == '\t');
                                 if (check != '\n' && check != '\r' && check != EOF) {
-                                    error_exit(ERROR_LEX, current_line, "Nepovolene znaky po viceradkovem blokovem komentari");
+                                    error_exit(ERROR_LEX, current_line, "Disallowed characters after multi-line block comment");
                                 }
                                 in_ungetc(f, check);
                                 token.type = EOL_TOKEN;
@@ -527,7 +527,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud se tam objevi psmeno tak je to lexikalni chyba 1
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Neocekavany znak u celociselneho literalu");
+                    error_exit(ERROR_LEX, current_line, "Unexpected character in integer literal");
                 }
                 //jinak je to cislo a patri do tokenu INT_NUM_TOKEN
                 else {
@@ -547,7 +547,7 @@ static Token scan_raw(FILE *f) {
                     state = INT_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Spatny format cisla s podtrzitkem");
+                    error_exit(ERROR_LEX, current_line, "Invalid number format with underscore");
                 }
                 break;
             
@@ -589,7 +589,7 @@ static Token scan_raw(FILE *f) {
                 else if (c == 'd' || c == 'D') {
                     int next = in_fgetc(f);
                     if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_') {
-                        error_exit(ERROR_LEX, current_line, "Chybny suffix double");
+                        error_exit(ERROR_LEX, current_line, "Invalid double suffix");
                     }
                     in_ungetc(f, next);
                     token.type = DOUBLE_NUM_TOKEN;
@@ -599,7 +599,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //to same ale pokud se tam vubec objevi nejake pismeno
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Neocekavany znak u double literalu");
+                    error_exit(ERROR_LEX, current_line, "Unexpected character in double literal");
                 }
                 //jinak je to DOUBLE_NUM_TOKEN (double cislo)
                 else {
@@ -619,7 +619,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //vyhodi chybu pokud tam je neco jineho
                 else {
-                    error_exit(ERROR_LEX, current_line, "Spatny format double s podtrzitkem");
+                    error_exit(ERROR_LEX, current_line, "Invalid double format with underscore");
                 }
                 break;
             
@@ -637,7 +637,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //jinak pokud zadny exp neni tak je to lexikalni chyba 1
                 else {
-                    error_exit(ERROR_LEX, current_line, "Ocekavan exponent");
+                    error_exit(ERROR_LEX, current_line, "Exponent expected");
                 }
                 break;
             
@@ -648,7 +648,7 @@ static Token scan_raw(FILE *f) {
                     state = EXP_DIGITS_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Ocekavano cislo v exponentu");
+                    error_exit(ERROR_LEX, current_line, "Digit expected in exponent");
                 }
                 break;
 
@@ -665,7 +665,7 @@ static Token scan_raw(FILE *f) {
                 else if (c == 'd' || c == 'D') {
                     int next = in_fgetc(f);
                     if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_') {
-                        error_exit(ERROR_LEX, current_line, "Chybny suffix exponentu");
+                        error_exit(ERROR_LEX, current_line, "Invalid exponent suffix");
                     }
                     in_ungetc(f, next);
                     token.type = DOUBLE_NUM_TOKEN;
@@ -675,7 +675,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je nejak epismeno tak je to lexikalni chyba 1
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Neocekavany znak po exponentu");
+                    error_exit(ERROR_LEX, current_line, "Unexpected character after exponent");
                 }
                 //jinak je to cislo a token DOUBLE_NUM_TOKEN
                 else {
@@ -694,7 +694,7 @@ static Token scan_raw(FILE *f) {
                     state = EXP_DIGITS_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Spatny format exponentu s podtrzitkem");
+                    error_exit(ERROR_LEX, current_line, "Invalid exponent format with underscore");
                 }
                 break;
 
@@ -725,7 +725,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je po 0 cislo nebo pismeno tak nemuze zapsat a je to lexikalni chyba
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-                    error_exit(ERROR_LEX, current_line, "Nulovy literal s neplatnym suffixem");
+                    error_exit(ERROR_LEX, current_line, "Zero literal with invalid suffix");
                 }
                 //jinak je to INT_NUM_TOKEN neboli cislo 
                 else {
@@ -843,7 +843,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud to neni && je to lexikalni chyba 1
                 else {
-                    error_exit(ERROR_LEX, current_line, "Ocekavan znak & pro operator AND");
+                    error_exit(ERROR_LEX, current_line, "Expected '&' character for AND operator");
                 }
                 break;
 
@@ -887,7 +887,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je tam konec souboru je to lexikalni chyba 1
                 else if (c == '\n' || c == '\r' || c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Neukonceny retezec");
+                    error_exit(ERROR_LEX, current_line, "Unterminated string literal");
                 }
                 //jiank se to tam vyoise ze je to nejake slovo 
                 else {
@@ -914,7 +914,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud neco z toho se neobjevi tak je to exikalni chyba protoze se radek musi nejak ukoncit lol
                 else {
-                    error_exit(ERROR_LEX, current_line, "Nepovolena escape sekvence");
+                    error_exit(ERROR_LEX, current_line, "Invalid escape sequence");
                 }
                 //jinat je to stale nejake slovo ktere se musi nacist 
                 state = STRING_STATE;
@@ -924,7 +924,7 @@ static Token scan_raw(FILE *f) {
             case MULTILINE_STRING_STATE:
                 //pokud je to EOF, je to lexikalni chyba 
                 if(c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Neukonceny vice radkovy retezec");
+                    error_exit(ERROR_LEX, current_line, "Unterminated multi-line string literal");
                 }
                 //jinak jestli tam jsou "", tak se to precte jako nejaky vety ci slova (napr. printf("Toto je moje myslenka v uvozovkach");) a je to STRING_WORD_TOKEN
                 else if (c == '"') {
@@ -958,7 +958,7 @@ static Token scan_raw(FILE *f) {
 
             //pokud je to nic z toho tak je to interni chyba 99
             default: 
-                error_exit(ERROR_INTERNAL, current_line, "Neznamy stav automatu");
+                error_exit(ERROR_INTERNAL, current_line, "Unknown state in fsm");
         }
     }
 
@@ -1020,7 +1020,7 @@ static int count_indent(FILE *f) {
                 while (nesting_level > 0) {
                     int bc = in_fgetc(f);
                     if (bc == EOF) {
-                        error_exit(ERROR_LEX, current_line, "Neukonceny blokovy komentar");
+                        error_exit(ERROR_LEX, current_line, "Unterminated block comment");
                     }
                     if (bc == '\n') {
                         comm_newline = true;
@@ -1058,12 +1058,12 @@ static int count_indent(FILE *f) {
                 else {
                     //pokud mel komentar novy radek a za nim je kod tak je to lexikalni chyba 1
                     if (comm_newline) {
-                        error_exit(ERROR_LEX, current_line, "Nepovolene znaky po viceradkovem blokovem komentari");
+                        error_exit(ERROR_LEX, current_line, "Disallowed characters after multi-line block comment");
                     }
                     //jinak vratime znak a zkontrolujeme tab
                     in_ungetc(f, after);
                     if (has_tab) {
-                        error_exit(ERROR_LEX, current_line, "Tabulator na neobrazdnem radku");
+                        error_exit(ERROR_LEX, current_line, "Tabulator on a non-empty line");
                     }
                     break;
                 }
@@ -1074,7 +1074,7 @@ static int count_indent(FILE *f) {
                 in_ungetc(f, '/');
                 //a pokud tam je tab tak je to lexikalni chyba 1
                 if (has_tab) {
-                    error_exit(ERROR_LEX, current_line, "Tabulator na neobrazdnem radku");
+                    error_exit(ERROR_LEX, current_line, "Tabulator on a non-empty line");
                 }
                 break;
             }
@@ -1084,7 +1084,7 @@ static int count_indent(FILE *f) {
             in_ungetc(f, c);
             //pokud je ta, tab, tak je to zase lexikalni chyba 1
             if (has_tab) {
-                error_exit(ERROR_LEX, current_line, "Tabulator na neobrazdnem radku");
+                error_exit(ERROR_LEX, current_line, "Tabulator on a non-empty line");
             }
             break;
         }
@@ -1134,7 +1134,7 @@ Token get_token(FILE *f) {
         if (spaces > indent_stack[stack]) {
             //ochrana proti preteceni je to interalni chyba 99
             if (stack >= 99) {
-                error_exit(ERROR_INTERNAL, current_line, "Preteceni zasobniku odsazeni");
+                error_exit(ERROR_INTERNAL, current_line, "Indentation stack overflow");
             }
             //ulozime novou uroven 
             stack++;
@@ -1152,7 +1152,7 @@ Token get_token(FILE *f) {
         }
         //pokud pocet mezer nesedi tak je to lexikalni chyba 1
         if (indent_stack[stack] != spaces) {
-            error_exit(ERROR_LEX, current_line, "Odsazeni neodpovida zadne urovni");
+            error_exit(ERROR_LEX, current_line, "Indentation level does not match any outer level");
         }
         //ulozime prvni dedent
         detents_reading--;
