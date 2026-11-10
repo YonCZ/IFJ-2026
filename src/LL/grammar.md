@@ -1,18 +1,16 @@
-# IFJ26 LL gramatika (v7)
+# IFJ26 LL gramatika (v8)
 
-Verze: v7, základní zadání.
+Verze: v8, základní zadání + rozšíření BOOLTHEN.
 
-Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11):
+Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 a §13):
 
 | otázka | rozhodnutí |
 |---|---|
-| error kód u nedefinovaného ID v dispatchi | chyba 3 (Moodle poznámka) |
-| `@main` na samostatném řádku × s `def` na jednom řádku | oba tvary povoleny (§1) |
-| `()` jako argument volání | ano, je to literál Unit (§6) |
+| `if` bez `else`, `else if`, Boolean literály a `!` | BOOLTHEN (§13) |
 
-Verifikace: `ll_check.py`, 65 tokenových streamů. Ověřuje bezkoliznost
+Verifikace: `ll_check.py`, 86 tokenových streamů. Ověřuje bezkoliznost
 LL tabulky (FIRST/FOLLOW, SELECT, 0 kolizí) a přijetí nebo odmítnutí vstupů
-tabulkovým parserem (65/65, §9). Rozsah záruky: bezkoliznost platí pro
+tabulkovým parserem (86/86, §9). Rozsah záruky: bezkoliznost platí pro
 modelované rozhraní (pseudoterminály mají FIRST ručně, výrazová analýza je
 aproximována automatem operandů a operátorů). Skript neověřuje sémantiku ani
 úplnost IFJ26; výrazy v celé šíři řeší precedenční tabulka.
@@ -22,7 +20,8 @@ aproximována automatem operandů a operátorů). Skript neověřuje sémantiku 
 - Terminály = tokeny z `token.h`:
   `IMPORT DEF VAL VAR IF THEN ELSE WHILE DO RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL
   LPAREN RPAREN COMMA COLON SEMICOLON ASSIGN DOT MUL AT EOL INDENT DEDENT EOF
-  INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN PLUS MINUS`
+  INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN PLUS MINUS
+  TRUE FALSE NOT AND OR BOOLEAN`
   (a operátory výrazů `MUL DIV LT LE GT GE EQ NEQ`, celé v kompetenci
   precedenční analýzy).
   Pozor: `INT_TOKEN` = typ, `INT_NUM` = literál, dva různé tokeny.
@@ -81,6 +80,7 @@ Param           → ID COLON Type
 RetType         → COLON Type                    (* {COLON} *)
                 | ε                              (* FOLLOW = {ASSIGN} *)
 Type            → INT_TOKEN | DOUBLE_TOKEN | STRING_TOKEN | UNIT_TOKEN
+                | BOOLEAN_TOKEN                 (* v8 BOOLTHEN *)
 Body            → Rhs EOL                       (* jednořádkové tělo *)
                 | EOL INDENT Block DEDENT        (* blokové tělo *)
 ```
@@ -158,8 +158,11 @@ ValStmt    → VAL ID ValVarTail
 VarStmt    → VAR ID ValVarTail
 ValVarTail → COLON Type ASSIGN Rhs            (* s typem, jeden logický řádek *)
            | ASSIGN Rhs                       (* bez typu *)
-IfStmt     → IF Expr THEN EOL INDENT Block DEDENT
-             ELSE EOL INDENT Block DEDENT     (* else v základu povinný *)
+IfStmt     → IF Expr THEN EOL INDENT Block DEDENT IfTail
+IfTail     → ELSE IfBranch                   (* v8 BOOLTHEN: else volitelné *)
+           | ε
+IfBranch   → EOL INDENT Block DEDENT IfTail
+           | IfStmt                          (* else if - celé if rekurzivně *)
 WhileStmt  → WHILE Expr DO EOL INDENT Block DEDENT
 ReturnStmt → RETURN RhsOpt                   (* výraz i volání *)
 RhsOpt     → Rhs
@@ -175,8 +178,8 @@ RhsOpt     → Rhs
 - `val` a `var` sdílejí `ValVarTail`. (liší se prvním tokenem) Inicializace je vždy povinná (§2.2); `var x: Int` bez `=`
   skončí chybou 2 (prázdná buňka `ASSIGN × EOL`, chybou 2.
 - `if` a `while`: po hlavičce následuje EOL a odsazený blok (§1.2).
-  `else` je v základním zadání povinný (§2.4). Za `DEDENT` větve
-  then následuje `ELSE` přímo, EOL patřil poslednímu příkazu bloku.
+  `else` je od v8 volitelný (BOOLTHEN, §13.3) a `else if` je rekurzivní
+  `IfStmt` (§13.4). Za `DEDENT` větve then následuje `ELSE` přímo.
 - `return` přebírá výraz nebo volání (`RhsOpt`), viz §4.2.
 
 ### 4.1 Typ a `=` na různých řádcích: chyba 2
@@ -280,6 +283,7 @@ ArgRest       → COMMA AfterCommaArg
 AfterCommaArg → Term ArgRest
               | ε                            (* koncová čárka: jen s EOL-flagem *)
 Term          → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
+              | TRUE_TOKEN | FALSE_TOKEN      (* v8 BOOLTHEN: literály §5.2 *)
               | LPAREN RPAREN                (* () = literál Unit *)
 ```
 
@@ -308,25 +312,27 @@ Term          → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
 | AfterCommaParam | `ID` | `RPAREN` | ano |
 | Param | `ID` | `COMMA RPAREN` | ne |
 | RetType | `COLON` | `ASSIGN` | ano |
-| Type | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN` | `ASSIGN COMMA RPAREN` | ne |
+| Type | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN BOOLEAN_TOKEN` | `ASSIGN COMMA RPAREN` | ne |
+| IfTail | `ELSE` | stmt-starty, `DEDENT EOL` | ano |
+| IfBranch | `EOL IF` | stmt-starty, `DEDENT EOL` | ne |
 | Body | `EOL ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `AT DEF EOL EOF` | ne |
 | Block | `VAL VAR IF WHILE RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `DEDENT` | ne |
 | BlockItem | (též jako Block) | stmt-starty, `DEDENT EOL` | ne |
 | StmtRest | `EOL`, stmt-starty | `DEDENT` | ano |
 | EndSimple | `EOL SEMICOLON` | stmt-starty, `DEDENT EOL` | ne |
-| SimpleStmt | `VAL VAR RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `EOL SEMICOLON` | ne |
+| SimpleStmt | `VAL VAR RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ne |
 | ValStmt / VarStmt | `VAL` / `VAR` | `EOL SEMICOLON` | ne |
 | ValVarTail | `ASSIGN COLON` | `EOL SEMICOLON` | ne |
 | IfStmt / WhileStmt | `IF` / `WHILE` | stmt-starty, `DEDENT EOL` | ne |
 | ReturnStmt | `RETURN` | `EOL SEMICOLON` | ne |
 | RhsOpt | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `EOL SEMICOLON` | ano |
-| Rhs | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `EOL SEMICOLON` | ne |
+| Rhs | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ne |
 | IdTail | `LPAREN`, operátory, `EOL SEMICOLON` | `EOL SEMICOLON` | ne |
 | StmtIdTail | `ASSIGN LPAREN`, operátory, `EOL SEMICOLON` | `EOL SEMICOLON` | ne |
 | ArgList | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN` | `RPAREN` | ano |
 | ArgRest | `COMMA` | `RPAREN` | ano |
 | AfterCommaArg | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN` | `RPAREN` | ano |
-| Term | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN` | `COMMA RPAREN` | ne |
+| Term | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `COMMA RPAREN` | ne |
 
 Pseudoterminály (interface, bez pravidel): `FIRST(Expr)` = FIRST(Rhs);
 `FIRST(ExprNoId)` = FIRST(Expr) bez `ID`; `FIRST(ExprFromId)` = binární
@@ -409,7 +415,7 @@ Nelegální vstupy, všechny končí chybou 2:
    (`ReturnStmt → RETURN RhsOpt`). Volání v podmínce zakázané:
    čisté `Expr`, §2.4 a §3.
 3. Dispatch úvodního ID: učitelova varianta se symtable (§5.1,
-   Moodle poznámka). Fórum „Čistá LL_gramatika“ (Ondryáš,
+   Moodle poznámka). Fórum „Čistá LL(1)_gramatika“ (Ondryáš,
    1. 11. 2026) potvrzuje, že odchylky od čisté LL jsou povolené,
    pokud jsou v dokumentaci popsány. Nedefinované ID (s `(` i bez)
    znamená chybu 3.
@@ -451,6 +457,7 @@ Nelegální vstupy, všechny končí chybou 2:
 | ValStmt / VarStmt | `parse_val_stmt()` / `parse_var_stmt()` | společný `parse_val_var_tail()` |
 | ValVarTail | `parse_val_var_tail()` | jednořádkové (§4.1) |
 | IfStmt / WhileStmt | `parse_if_stmt()` / `parse_while_stmt()` | |
+| IfTail / IfBranch | `parse_if_tail()` / `parse_if_branch()` | else-if = rekurzivní `parse_if_stmt()` |
 | ReturnStmt | `parse_return_stmt()` | ε-větev `RhsOpt` = holý return |
 | RhsOpt | inline | |
 | Rhs | `parse_rhs()` | ID → dispatch symtable (§5.1) → parse_id_tail() / `parse_expression_from()`; jinak `parse_expression()` |
@@ -459,3 +466,90 @@ Nelegální vstupy, všechny končí chybou 2:
 | ArgList / ArgRest / AfterCommaArg | `parse_args()` a další | flag u AfterCommaArg |
 | Term | `parse_term()` | včetně `()` |
 | Expr / ExprNoId / ExprFromId | precedenční analýza | `parse_expression()`, `parse_expression_from(tok)`; stopping: EOL, SEMICOLON, THEN, DO |
+
+## 13. Rozšíření BOOLTHEN
+
+Specifikace §5.2 (PDF): přidává typ `Boolean`, literály `true` a `false`,
+unární negaci `!`, binární operátory `&&` a `||`, vestavěnou funkci
+`readBoolean`, zkrácený podmíněný příkaz (bez `else`) a větve `else if`.
+Změněná pravidla jsou v §2, §4 a §6; zde zdůvodnění.
+
+### 13.1 Literály `true` a `false`
+
+Jsou to termy jako každý jiný literál: `Term` má dvě nové varianty,
+projdou tedy i jako argumenty volání (`negate(true)`). Zároveň jsou
+operandem výrazu, takže FIRST(Expr) přibralo `TRUE_TOKEN` a `FALSE_TOKEN`
+a tabulka se přepočítala v celých řádcích dotčených pravidel (SimpleStmt,
+Rhs, RhsOpt, Body, Block, BlockItem, StmtRest). Nové tokeny nejsou v žádném
+existujícím FIRST ani FOLLOW, nová kolize tedy vzniknout nemohla.
+
+`true` a `false` nejsou v seznamu klíčových slov §1.1 - specifikace je
+říká literály. Přidání rozšíření jazyk zužuje: to, co bylo (teoreticky)
+platným identifikátorem, se rezervuje. Podle §1.1 se na výskyt podtržených
+klíčových slov v základním zadání testovat nebude.
+
+### 13.2 Typ `Boolean`
+
+Pátá varianta `Type`. Nový terminál, který není v žádném existujícím FIRST
+ani FOLLOW, konflikt vytvořit nemůže: buňka `Type × BOOLEAN_TOKEN` byla
+prázdná a nárokuje si ji jediné nové pravidlo.
+
+### 13.3 Volitelné `else` (IfTail)
+
+`IfTail → ELSE IfBranch | ε`. Predikt ε-větve je FOLLOW(IfTail) =
+stmt-starty ∪ {EOL, DEDENT}; větev s ELSE má Predikt {ELSE}. Množiny jsou
+disjunktní - `ELSE` není začátek příkazu ani ukončovač, takže parser
+na DEDENT či začátku dalšího příkazu správně pozná konec ifu.
+
+Otestováno v obou polohách: if bez else následovaný dalším příkazem
+(StmtRest pokračuje) i jako poslední příkaz bloku (StmtRest končí
+na DEDENT).
+
+### 13.4 `else if` a dangling else
+
+`IfBranch → EOL INDENT Block DEDENT IfTail | IfStmt`. Za `else if` stojí
+celé if znovu - rekurzivní použití `IfStmt`, ne nová větev. Rozlišení
+jedním lookaheadem: `{EOL}` × `{IF}`, čisté.
+
+„Zarovnáno s if" (§5.2) je pravidlo scanneru, v LL tabulce neviditelné -
+vidíme jen jeho důsledek, počty DEDENTů. Méně odsazený `else if` proto
+uvízne stejně jako `else` bez ničeho (prázdná buňka `IfBranch × DEDENT`,
+případně očekáváno EOL).
+
+Dangling else. S volitelným `else` by `if a then⏎ if b then …⏎ else`
+mohlo patřit dvěma ifům. V IFJ26 kolidovat nemůže: else musí ležet
+na vlastním logickém řádku odsazeném stejně jako jeho if (§2.4) a scanner
+vrací přesně jeden DEDENT na úroveň odsazení (kontrakt b). Tokenový proud
+proto nese počet DEDENTů odpovídající tomu, kolik bloků se mezi then
+a else zavřelo - gramatika dostane jednoznačnou informaci, ke kterému
+if else patří (test „if bez else poslední v bloku, ELSE patří vnějšímu").
+
+### 13.5 Operátory `!`, `&&`, `||`
+
+`!` je unární operátor jako `+` a `-`: FIRST(Expr) přibralo `NOT_TOKEN`
+(tělo `def negate(…): Boolean = !value` začíná vykřičníkem, projde
+cestou ExprNoId).
+
+`&&` a `||` nemění jediné pravidlo gramatiky. Jsou binární operátory
+uvnitř výrazů - věc precedenční tabulky. Gramatiku se dotýkají jedině
+nepřímo: výraz může pokračovat od uloženého ID, takže FIRST(ExprFromId)
+přibralo `AND_TOKEN` a `OR_TOKEN` (buňky IdTail a StmtIdTail × `&&`/`||`).
+Stopping tokeny (EOL, SEMICOLON, THEN, DO) se nemění - `&&` nikdy
+nezačíná výraz ani neukončuje příkaz; jinde než mezi operandy jde o chybu 2
+(prázdná buňka) nebo neúplný výraz (visící operátor).
+
+### 13.6 Podmínka if a while
+
+„Libovolný výraz typu Boolean" (§5.2) místo „relační výraz" (§2.4) -
+syntakticky beze změny. `IfStmt` měl od začátku `IF Expr THEN`, takže
+holá proměnná i `!enabled` prochází stejnou cestou; „relační" bylo
+sémantické omezení (typová kontrola), ne tvar.
+
+### 13.7 Překlopený test základu a otevřená otázka
+
+Test „if bez else → chyba 2" ze základu je překlopen na legální: jediná
+gramatika pro všechna rozšíření nemá jak odlišit program základní od
+programu s BOOLTHEN. Otevřená strategická otázka (fórum): musí překladač
+s implementovaným BOOLTHEN odmítat `if` bez `else` v programech, které
+jinak rozšíření nepoužívají? Obdobně se bude řešit každé další rozšíření
+měnící povinné části základu.
