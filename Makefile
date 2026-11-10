@@ -4,6 +4,8 @@ SRC = $(wildcard src/*.c) $(wildcard src/*/*.c)
 OBJ = $(SRC:.c=.o)
 TARGET = compiler
 
+all: build
+
 build: $(TARGET)
 
 $(TARGET): $(OBJ)
@@ -15,4 +17,4 @@ $(TARGET): $(OBJ)
 clean:
 	rm -f $(OBJ) $(TARGET)
 
-.PHONY: build clean
+.PHONY: all build clean
