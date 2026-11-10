@@ -1,19 +1,11 @@
-# LL tabulka (v9)
+# LL tabulka (v10)
 
 Ověřeno skriptem `ll_check.py` (0 kolizí). Kombinace neterminál × token, která v tabulce není, = prázdná buňka = syntaktická chyba 2.
 
 | Neterminál | Tokeny | Pravidlo |
 |---|---|---|
-| `AfterCommaArg` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `INT_NUM`, `LPAREN`, `STRING_LITERAL`, `TRUE_TOKEN` | `Term ArgRest` |
-| `AfterCommaArg` | `RPAREN` | `ε` |
 | `AfterCommaParam` | `ID` | `Param ParamRest` |
 | `AfterCommaParam` | `RPAREN` | `ε` |
-| `ArgGroups` | `LPAREN` | `LPAREN ArgList RPAREN ArgGroups` |
-| `ArgGroups` | `EOL`, `SEMICOLON` | `ε` |
-| `ArgList` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `INT_NUM`, `LPAREN`, `STRING_LITERAL`, `TRUE_TOKEN` | `Term ArgRest` |
-| `ArgList` | `RPAREN` | `ε` |
-| `ArgRest` | `COMMA` | `COMMA AfterCommaArg` |
-| `ArgRest` | `RPAREN` | `ε` |
 | `Block` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `IF`, `INT_NUM`, `LPAREN`, `RETURN`, `STRING_LITERAL`, `TRUE_TOKEN`, `VAL`, `VAR`, `WHILE` | `BlockItem StmtRest` |
 | `BlockItem` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `INT_NUM`, `LPAREN`, `RETURN`, `STRING_LITERAL`, `TRUE_TOKEN`, `VAL`, `VAR` | `SimpleStmt LineEnd` |
 | `BlockItem` | `IF` | `IfStmt` |
@@ -30,8 +22,6 @@ Ověřeno skriptem `ll_check.py` (0 kolizí). Kombinace neterminál × token, kt
 | `FuncDefs` | `AT`, `DEF` | `FuncDef FuncDefs` |
 | `FuncDefs` | `EXTENSION` | `ExtensionDef FuncDefs` |
 | `FuncDefs` | `EOF` | `ε` |
-| `IdTail` | `LPAREN` | `LPAREN ArgList RPAREN ArgGroups` |
-| `IdTail` | `AND_TOKEN`, `DIV`, `DOT`, `EOL`, `EQ`, `GE`, `GT`, `LE`, `LT`, `MINUS`, `MUL`, `NEQ`, `OR_TOKEN`, `PLUS`, `SEMICOLON` | `ExprFromId` |
 | `IfBranch` | `EOL` | `EOL INDENT Block DEDENT` |
 | `IfBranch` | `IF` | `IfStmt` |
 | `IfStmt` | `IF` | `IF Expr THEN EOL INDENT Block DEDENT IfTail` |
@@ -63,8 +53,6 @@ Ověřeno skriptem `ll_check.py` (0 kolizí). Kombinace neterminál × token, kt
 | `RetType` | `COLON` | `COLON Type` |
 | `RetType` | `ASSIGN` | `ε` |
 | `ReturnStmt` | `RETURN` | `RETURN RhsOpt` |
-| `Rhs` | `ID` | `ID IdTail` |
-| `Rhs` | `DOUBLE_NUM`, `FALSE_TOKEN`, `INT_NUM`, `LPAREN`, `MINUS`, `NOT_TOKEN`, `PLUS`, `STRING_LITERAL`, `TRUE_TOKEN` | `ExprNoId` |
 | `RhsOpt` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `INT_NUM`, `LPAREN`, `MINUS`, `NOT_TOKEN`, `PLUS`, `STRING_LITERAL`, `TRUE_TOKEN` | `Rhs` |
 | `RhsOpt` | `EOL`, `SEMICOLON` | `ε` |
 | `SimpleStmt` | `VAL` | `ValStmt` |
@@ -73,17 +61,10 @@ Ověřeno skriptem `ll_check.py` (0 kolizí). Kombinace neterminál × token, kt
 | `SimpleStmt` | `ID` | `ID StmtIdTail` |
 | `SimpleStmt` | `DOUBLE_NUM`, `FALSE_TOKEN`, `INT_NUM`, `LPAREN`, `STRING_LITERAL`, `TRUE_TOKEN` | `ExprStmt` |
 | `StmtIdTail` | `ASSIGN` | `ASSIGN Rhs` |
-| `StmtIdTail` | `AND_TOKEN`, `DIV`, `DOT`, `EOL`, `EQ`, `GE`, `GT`, `LE`, `LPAREN`, `LT`, `MINUS`, `MUL`, `NEQ`, `OR_TOKEN`, `PLUS`, `SEMICOLON` | `IdTail` |
+| `StmtIdTail` | `AND_TOKEN`, `DIV`, `DOT`, `EOL`, `EQ`, `GE`, `GT`, `LE`, `LPAREN`, `LT`, `MINUS`, `MUL`, `NEQ`, `OR_TOKEN`, `PLUS`, `SEMICOLON` | `ExprFromId` |
 | `StmtRest` | `EOL` | `EOL StmtRest` |
 | `StmtRest` | `DOUBLE_NUM`, `FALSE_TOKEN`, `ID`, `IF`, `INT_NUM`, `LPAREN`, `RETURN`, `STRING_LITERAL`, `TRUE_TOKEN`, `VAL`, `VAR`, `WHILE` | `BlockItem StmtRest` |
 | `StmtRest` | `DEDENT` | `ε` |
-| `Term` | `ID` | `ID` |
-| `Term` | `INT_NUM` | `INT_NUM` |
-| `Term` | `DOUBLE_NUM` | `DOUBLE_NUM` |
-| `Term` | `STRING_LITERAL` | `STRING_LITERAL` |
-| `Term` | `LPAREN` | `LPAREN RPAREN` |
-| `Term` | `TRUE_TOKEN` | `TRUE_TOKEN` |
-| `Term` | `FALSE_TOKEN` | `FALSE_TOKEN` |
 | `Type` | `INT_TOKEN` | `INT_TOKEN` |
 | `Type` | `DOUBLE_TOKEN` | `DOUBLE_TOKEN` |
 | `Type` | `STRING_TOKEN` | `STRING_TOKEN` |

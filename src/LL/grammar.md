@@ -1,6 +1,7 @@
-# IFJ26 LL gramatika (v9)
+# IFJ26 LL gramatika (v10)
 
-Verze: v9, základní zadání + BOOLTHEN + PARAMLISTS + VALMEM + EXTKW  v args metod, after_member reset).
+Verze: v10, základní zadání + BOOLTHEN + PARAMLISTS + VALMEM + EXTKW + FUNEXP
+( volání jako postfix výrazu, argumenty = výrazy).
 
 Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 a §13):
 
@@ -8,10 +9,11 @@ Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 
 |---|---|
 | `if` bez `else`, `else if`, Boolean literály a `!` | BOOLTHEN (§13) |
 | 0..n skupin parametrů, `def f = 42`; `.člen` postfix; `extension` bloky | PARAMLISTS + VALMEM + EXTKW (§14) |
+| volání ve výrazu, výrazy jako argumenty | FUNEXP (§15) |
 
-Verifikace: `ll_check.py`, 133 tokenových streamů. Ověřuje bezkoliznost
+Verifikace: `ll_check.py`, 146 tokenových streamů. Ověřuje bezkoliznost
 LL tabulky (FIRST/FOLLOW, SELECT, 0 kolizí) a přijetí nebo odmítnutí vstupů
-tabulkovým parserem (133/133, §9). Rozsah záruky: bezkoliznost platí pro
+tabulkovým parserem (146/146, §9). Rozsah záruky: bezkoliznost platí pro
 modelované rozhraní (pseudoterminály mají FIRST ručně, výrazová analýza je
 aproximována automatem operandů a operátorů). Skript neověřuje sémantiku ani
 úplnost IFJ26; výrazy v celé šíři řeší precedenční tabulka.
@@ -247,25 +249,24 @@ return výraz-nebo-volání“).
   chybu 2 (za proměnnou nesmí být závorka), nedefinované id chybu 3.
 - Holé `return`: ε-větev `RhsOpt` zůstává, rozhodnuto připouštět (§11.1).
 
-## 5. Výraz-nebo-volání: Rhs a kolize id
+## 5. Výraz: Rhs jako alias, dispatch na úrovni příkazu
 
 ```ebnf
-Rhs        → ID IdTail                       (* výraz-nebo-volání: za =, za return, v těle *)
-           | ExprNoId                        (* literál / ( / unární ±: rovnou výrazová analýza *)
-IdTail     → LPAREN ArgList RPAREN ArgGroups  (* v9: volání id(args)(args2)… *)
-           | ExprFromId                      (* operátory, &&/||, .člen - viz §14 *)
-ArgGroups  → LPAREN ArgList RPAREN ArgGroups  (* Predikt: {LPAREN}; FOLLOW = {EOL, SEMI} *)
-           | ε                                (* za poslední skupinou NESMÍ pokračovat
-                                               výraz - add(1)(2) + 3 = chyba 2 (FUNEXP) *)
+Rhs        → Expr                           (* v10 FUNEXP: alias - volání je
+                                              postfix výrazu, styčný bod jako Expr *)
 StmtIdTail → ASSIGN Rhs                      (* přiřazení, jen na úrovni příkazu *)
-           | IdTail
+           | ExprFromId                      (* výrazový příkaz od uloženého ID;
+                                              LPAREN = volání f(1) (v10) *)
 
 Expr       → (* výraz od aktuálního tokenu *)
 ExprNoId   → (* totéž; volající zaručuje, že začátek není ID *)
-ExprFromId → (* výraz od už přečteného tokenu ID *)
+ExprFromId → (* výraz od už přečteného tokenu ID - je to operand *)
 ```
 
-`Expr`, `ExprNoId`, `ExprFromId` nemají pravidla; jsou to styčné body
+`Rhs` je od v10 pseudoterminál (alias pro `Expr`, FIRST beze změny) -
+`IdTail`, `ArgGroups` a `Term` z v9 mizí: volání je postfix
+na libovolném operandu a patří výrazové analýze (§15).
+`Expr`, `ExprNoId`, `ExprFromId`, `Rhs` nemají pravidla; jsou to styčné body
 s precedenční analýzou. Výrazy jsou v LL gramatice záměrně
 (účel: zadání výrazy přiděluje precedenční analýze, přirozená
 gramatika výrazů používá levou rekurci, která je v LL zakázaná).
@@ -306,22 +307,22 @@ symbolu. Neznámý symbol po předprůchodu je chyba 3.
 ## 6. Argumenty volání
 
 ```ebnf
-ArgList       → Term ArgRest
-              | ε                            (* FIRST(Term) | {RPAREN} *)
+ArgList       → Expr ArgRest                 (* v10 FUNEXP: argumenty = výrazy *)
+              | ε                            (* FIRST(Expr) | {RPAREN} *)
 ArgRest       → COMMA AfterCommaArg
               | ε
-AfterCommaArg → Term ArgRest
+AfterCommaArg → Expr ArgRest
               | ε                            (* koncová čárka: jen s EOL-flagem *)
-Term          → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
-              | TRUE_TOKEN | FALSE_TOKEN      (* v8 BOOLTHEN: literály §5.2 *)
-              | LPAREN RPAREN                (* () = literál Unit *)
 ```
 
-Řešení:
-
-- Argumenty jsou v základu pouze termy. §2.3: „seznam argumentů je
-  tvořen pouze termy, tedy literály nebo identifikátory proměnných
-  (ne výrazy)“. Plný výraz jako argument je až FUNEXP.
+Poznámka (v10): tato pravidla nejsou v LL tabulce - seznam argumentů
+zpracovává výrazová analýza jako součást výrazu (sdílený `parse_arg_list`
+pro volání i metody; koncová čárka jen s EOL-flagem na závěrečné `)` -
+vnořené závorky seskupení a volání patří dovnitř výrazu, seznam se zastaví
+před čárkou a svou uzavírací `)`). §6 je tedy popis jazyka seznamu pro
+výrazovou část, ne pravidla LL sestupu - ta by byla od Program odpojená
+(prázdné FOLLOW). `Term` z v9 mizí - `()` je součástí obecného výrazu.
+Původní řešení (termy) platila do v9; FUNEXP ji nahrazuje.
 - `()` je literál Unit (§1.1: „Literál hodnoty typu Unit se zapisuje
   ()“), proto je legální například `print(())`.
 - Koncová čárka: tentýž vzor jako u parametrů v §2, včetně kontroly
@@ -362,13 +363,9 @@ Term          → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
 | ReturnStmt | `RETURN` | `EOL SEMICOLON` | ne |
 | RhsOpt | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ano |
 | Rhs | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ne |
-| IdTail | `LPAREN`, operátory, `EOL SEMICOLON DOT` | `EOL SEMICOLON` | ne |
-| ArgGroups | `LPAREN` | `EOL SEMICOLON` | ano |
-| StmtIdTail | `ASSIGN LPAREN`, operátory, `EOL SEMICOLON` | `EOL SEMICOLON` | ne |
-| ArgList | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `RPAREN` | ano |
+| Rhs | (pseudoterminál - alias pro Expr, §5) | - | ne |
+| StmtIdTail | `ASSIGN`, operátory, `EOL SEMICOLON LPAREN` | `EOL SEMICOLON` | ne |
 | ArgRest | `COMMA` | `RPAREN` | ano |
-| AfterCommaArg | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `RPAREN` | ano |
-| Term | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `COMMA RPAREN` | ne |
 
 Pseudoterminály (interface, bez pravidel): `FIRST(Expr)` = FIRST(Rhs);
 `FIRST(ExprStmt)` = FIRST(Expr) bez `ID` a unárních `+`/`-`/`!` (§13.8);
@@ -498,12 +495,12 @@ Nelegální vstupy, všechny končí chybou 2:
 | IfTail / IfBranch | `parse_if_tail()` / `parse_if_branch()` | else-if = rekurzivní `parse_if_stmt()` |
 | ReturnStmt | `parse_return_stmt()` | ε-větev `RhsOpt` = holý return |
 | RhsOpt | inline | |
-| Rhs | `parse_rhs()` | ID → dispatch symtable (§5.1) → parse_id_tail() / `parse_expression_from()`; jinak `parse_expression()` |
+| Rhs | `parse_rhs()` | v10: volání výrazové analýzy (alias Expr); symtable dispatch uvnitř ní |
 | StmtIdTail | `parse_stmt_id_tail()` | ASSIGN → parse_rhs(); jinak dispatch (§5.1) |
-| IdTail | `parse_id_tail()` | LPAREN → args + `parse_arg_groups()` (v9); jinak `parse_expression_from(saved)` |
+| StmtIdTail | `parse_stmt_id_tail()` | ASSIGN → parse_rhs(); jinak `parse_expression_from(saved)` (LPAREN = volání, v10) |
 | ArgList / ArgRest / AfterCommaArg | `parse_args()` a další | flag u AfterCommaArg |
 | Term | `parse_term()` | včetně `()` |
-| Expr / ExprNoId / ExprFromId | precedenční analýza | `parse_expression()`, `parse_expression_from(tok)`; stopping: EOL, SEMICOLON, THEN, DO |
+| Expr / ExprNoId / ExprFromId | precedenční analýza | `parse_expression()`, `parse_expression_from(tok)`; stopping: EOL, SEMICOLON, THEN, DO, **COMMA, RPAREN** (čárka a uzavírací závorka seznamu argumentů - seskupovací a vnořené závorky patří dovnitř výrazu, §6) |
 
 ## 13. Rozšíření BOOLTHEN
 
@@ -722,3 +719,70 @@ v testech dávky 5 přikláníme k legálnímu, sondu má potvrdit.
    VOLAJÍ (§5.10, §14.5) - řádek „funkce + jiný → chyba 2" platí jen pro
    ≥1 skupinu. FIRST `Block`/`StmtRest` v §7 odpovídá vypočtené tabulce
    (bez unárních - `ExprStmt` je na začátku řádku zakazuje).
+
+## 15. Rozšíření FUNEXP
+
+Specifikace §5.1: „Volání vestavěné i uživatelské funkce může být součástí
+výrazu. Argumentem funkce může být libovolný výraz. Volání lze vnořovat
+a argumenty se vyhodnocují zleva doprava.“ Naplňuje slib z §14.4 -
+subtraktivní delta: `IdTail`, `ArgGroups` a `Term` mizí, `Rhs` se stává
+aliasem pro `Expr`, argumenty jsou výrazy.
+
+### 15.1 Co se změnilo
+
+| oblast | v9 | v10 |
+|---|---|---|
+| volání | `IdTail → LPAREN ArgList RPAREN ArgGroups` | postfix výrazu - věc výrazové analýzy |
+| `Rhs` | `ID IdTail \| ExprNoId` | pseudoterminál - alias pro `Expr` |
+| `StmtIdTail` | `ASSIGN Rhs \| IdTail` | `ASSIGN Rhs \| ExprFromId` (FIRST += `LPAREN`) |
+| argumenty | termy (`Term`) | výrazy (`Expr`; sdílený `parse_arg_list` s metodami) |
+| `f(1) + 2`, `f(1).toString`, `add(1)(2) + 3` | chyba 2 | OK (volání = postfix) |
+| `(1+2)(3)`, `1(2)` | chyba 2 | tvar OK (model); platnost rozhodne deklarace |
+
+Rozlišujeme přijetí tvaru modelem a platnost volání podle deklarace:
+`(1+2)(3)` ani `1(2)` nemohou být nikdy platná (volat lze jen funkci;
+Int není funkce - sémantická odmítnutí), ale model tvar správně rozpozná
+a kontrola volání ho odmítne. `add(1)(2)` u funkce se dvěma skupinami
+je jedno volání se dvěma seznamy argumentů (§5.10: tělo se provede
+až po vyhodnocení obou skupin) - ne dvě volání.
+
+Přiřazení není výraz: `x = y = 1` zůstává chyba 2 - proto `StmtIdTail`
+přežívá jako jediná dispatch vrstva na úrovni příkazu. `x(1) = 2` umírá
+na `LineEnd × ASSIGN`. Podmínka if/while je výraz → `if f(1) then`
+je od v10 syntakticky legální (sémantika: návratový typ Boolean).
+
+### 15.2 after_operand (kontrakt s výrazovou analýzou)
+
+Příznak `after_member` (v9) se mění na `after_operand` - LPAREN
+v operátor-stavu po libovolném operandu = volání. Přechody:
+
+| událost | after_operand |
+|---|---|
+| start `ExprFromId` (uložené ID je operand) | True |
+| operand (id, literál, TRUE/FALSE) | True |
+| unární `+ - !` (čeká se operand) | nemění (False) |
+| `()` - prázdná závorka | True |
+| `)` - zavření neprázdné závorky | True (v9.1 reset; v10 přetočeno - zavřený výraz je operand) |
+| binární operátor | False |
+| `.člen` | True |
+| argumentová skupina `_args()` | True (zůstává - řetězy `f(1)(2)`) |
+
+`1(2)` - volání na literálu - je syntakticky legální; sémantika odmítne
+(kód k dořešení: 5 × 6, sémantická past). `f()` na 0-skupinové funkci →
+chyba 5 (špatný počet seznamů, §5.10). Řetězy `f(1)(2)(3)`
+a mixy `f(1).g(2).h(3)` fungují přes after_operand bez omezení délky.
+
+### 15.3 Sémantika dispatch (§5.1, doplněk)
+
+FUNEXP nemění symtable pravidla - volání se jen může objevit na více
+místech. `val x = f` (f ≥1 skupina) = nadále chyba 2 (funkce není hodnota,
+eta-expanze až LAMBDAS); `f` 0-skupinová = volání bez závorek (§14.5).
+
+### 15.4 Výhled (LAMBDAS)
+
+Výrazy jsou od v10 celé u výrazové analýzy - operátory, priority,
+závorky, volání, postfix. To je předpoklad LAMBDAS:
+rozlišení `(x: Int) => …` od `(x + 1)` vyžaduje najít párovou `)`
+a zkusit `=>` - LL tabulka to neumí, recursive descent výrazové
+analýzy ano. CONTROL (if-výraz) a LISTS (indexování `lst(2)`)
+z téhoě konvergence těží.
