@@ -1,6 +1,7 @@
-# IFJ26 LL gramatika (v8)
+# IFJ26 LL gramatika (v8.1)
 
-Verze: v8, základní zadání + rozšíření BOOLTHEN.
+Verze: v8.1, základní zadání + rozšíření BOOLTHEN (opravy po review: ukončení
+else-řetězu, začátek logického řádku, relační řetězy nad `&&`/`||`).
 
 Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 a §13):
 
@@ -8,9 +9,9 @@ Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 
 |---|---|
 | `if` bez `else`, `else if`, Boolean literály a `!` | BOOLTHEN (§13) |
 
-Verifikace: `ll_check.py`, 86 tokenových streamů. Ověřuje bezkoliznost
+Verifikace: `ll_check.py`, 95 tokenových streamů. Ověřuje bezkoliznost
 LL tabulky (FIRST/FOLLOW, SELECT, 0 kolizí) a přijetí nebo odmítnutí vstupů
-tabulkovým parserem (86/86, §9). Rozsah záruky: bezkoliznost platí pro
+tabulkovým parserem (95/95, §9). Rozsah záruky: bezkoliznost platí pro
 modelované rozhraní (pseudoterminály mají FIRST ručně, výrazová analýza je
 aproximována automatem operandů a operátorů). Skript neověřuje sémantiku ani
 úplnost IFJ26; výrazy v celé šíři řeší precedenční tabulka.
@@ -153,7 +154,9 @@ Rohové případy (ověřeno trasováním, §9):
 ```ebnf
 SimpleStmt → ValStmt | VarStmt | ReturnStmt
            | ID StmtIdTail                   (* přiřazení / volání / výraz od id *)
-           | ExprNoId                        (* výraz nezačínající id *)
+           | ExprStmt                        (* výrazový příkaz - bez unárních
+                                              operátorů, §1.2: logický řádek
+                                              nezačíná operátorem (v8.1) *)
 ValStmt    → VAL ID ValVarTail
 VarStmt    → VAR ID ValVarTail
 ValVarTail → COLON Type ASSIGN Rhs            (* s typem, jeden logický řádek *)
@@ -161,8 +164,9 @@ ValVarTail → COLON Type ASSIGN Rhs            (* s typem, jeden logický řád
 IfStmt     → IF Expr THEN EOL INDENT Block DEDENT IfTail
 IfTail     → ELSE IfBranch                   (* v8 BOOLTHEN: else volitelné *)
            | ε
-IfBranch   → EOL INDENT Block DEDENT IfTail
-           | IfStmt                          (* else if - celé if rekurzivně *)
+IfBranch   → EOL INDENT Block DEDENT      (* obyčejné else ukončuje řetěz (v8.1) *)
+           | IfStmt                          (* else if - celé if rekurzivně,
+                                              má svůj vlastní IfTail *)
 WhileStmt  → WHILE Expr DO EOL INDENT Block DEDENT
 ReturnStmt → RETURN RhsOpt                   (* výraz i volání *)
 RhsOpt     → Rhs
@@ -315,26 +319,27 @@ Term          → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
 | Type | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN BOOLEAN_TOKEN` | `ASSIGN COMMA RPAREN` | ne |
 | IfTail | `ELSE` | stmt-starty, `DEDENT EOL` | ano |
 | IfBranch | `EOL IF` | stmt-starty, `DEDENT EOL` | ne |
-| Body | `EOL ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `AT DEF EOL EOF` | ne |
-| Block | `VAL VAR IF WHILE RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `DEDENT` | ne |
+| Body | `EOL ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `AT DEF EOL EOF` | ne |
+| Block | `VAL VAR IF WHILE RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `DEDENT` | ne |
 | BlockItem | (též jako Block) | stmt-starty, `DEDENT EOL` | ne |
 | StmtRest | `EOL`, stmt-starty | `DEDENT` | ano |
 | EndSimple | `EOL SEMICOLON` | stmt-starty, `DEDENT EOL` | ne |
-| SimpleStmt | `VAL VAR RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ne |
+| SimpleStmt | `VAL VAR RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `EOL SEMICOLON` | ne |
 | ValStmt / VarStmt | `VAL` / `VAR` | `EOL SEMICOLON` | ne |
 | ValVarTail | `ASSIGN COLON` | `EOL SEMICOLON` | ne |
 | IfStmt / WhileStmt | `IF` / `WHILE` | stmt-starty, `DEDENT EOL` | ne |
 | ReturnStmt | `RETURN` | `EOL SEMICOLON` | ne |
-| RhsOpt | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS` | `EOL SEMICOLON` | ano |
+| RhsOpt | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ano |
 | Rhs | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `EOL SEMICOLON` | ne |
 | IdTail | `LPAREN`, operátory, `EOL SEMICOLON` | `EOL SEMICOLON` | ne |
 | StmtIdTail | `ASSIGN LPAREN`, operátory, `EOL SEMICOLON` | `EOL SEMICOLON` | ne |
-| ArgList | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN` | `RPAREN` | ano |
+| ArgList | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `RPAREN` | ano |
 | ArgRest | `COMMA` | `RPAREN` | ano |
-| AfterCommaArg | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN` | `RPAREN` | ano |
+| AfterCommaArg | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `RPAREN` | ano |
 | Term | `ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `COMMA RPAREN` | ne |
 
 Pseudoterminály (interface, bez pravidel): `FIRST(Expr)` = FIRST(Rhs);
+`FIRST(ExprStmt)` = FIRST(Expr) bez `ID` a unárních `+`/`-`/`!` (§13.8);
 `FIRST(ExprNoId)` = FIRST(Expr) bez `ID`; `FIRST(ExprFromId)` = binární
 operátory a `{EOL, SEMICOLON}` (výraz může být jen to samotné ID).
 
@@ -553,3 +558,30 @@ programu s BOOLTHEN. Otevřená strategická otázka (fórum): musí překladač
 s implementovaným BOOLTHEN odmítat `if` bez `else` v programech, které
 jinak rozšíření nepoužívají? Obdobně se bude řešit každé další rozšíření
 měnící povinné části základu.
+
+### 13.8 Opravy v8.1 (po externím review)
+
+Tři chyby nalezené review, ověřené na kontrolním parseru a opravené:
+
+1. Obyčejné `else` ukončuje řetěz větví. Původní
+   `IfBranch → EOL INDENT Block DEDENT IfTail` přijímal i
+   `if … else … else …` a `if … else … else if` - gramatika zvolila
+   pravidlo jednoznačně (žádná kolize), jen pravidlo přijímalo příliš
+   mnoho. Řetězení je dáno výhradně přes `else if` (§5.2): bloková
+   větev else je vždy posledná, rekurzivní `IfStmt` v druhé větvi má
+   svůj vlastní `IfTail`, takže řetěz `else if … else if … else`
+   funguje dál. Regresní testy: dvojitý `else` a `else`-blok následovaný
+   `else if` → chyba 2.
+2. Výrazový příkaz nezačíná unárním operátorem. §1.2: logický řádek
+   nemůže začínat operátorem. Příkaz začíná logickou řádkou, proto
+   `SimpleStmt → ExprStmt` s `FIRST(ExprStmt)` bez `+`, `-` a `!`
+   (mezera u `+`/`-` existovala už od základní verze; `!` ji rozšířil
+   BOOLTHEN). Pozice uprostřed řádku jsou beze změny: `val x = !true`,
+   `if !x then`, `def f(): Boolean = !value` zůstávají legální
+   (výraz za `=`, `then`, v těle na stejném logickém řádku).
+3. Relační řetězy se počítají po `&&`/`||`. Model výrazu odmítal
+   legální `1 < 2 && 3 < 4`, protože počítal všechna porovnání na úrovni
+   dohromady. Podle §5.2 mají relační operátory vyšší prioritu než `&&`,
+   tedy každé porovnání tvoří vlastní podvýraz a spojka `&&`/`||`
+   řetěz uzavírá. Počítadlo se resetuje při `&&`/`||`; řetězení uvnitř
+   jednoho podvýrazu (`1 < 2 < 3`) i nadále chyba.
