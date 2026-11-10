@@ -9,6 +9,16 @@ Pseudoterminály Expr / ExprNoId / ExprFromId modelují rozhraní s výrazovou
 LPAREN po operandu výraz ukončuje - volání ve výrazu v základu neexistuje.
 RPAREN! = uzavírací závorka se nastaveným EOL-flagem (varianta b).
 
+v9 :
+  - PARAMLISTS: Params → ParamGroup Params | ε (def answer = 42 = nula skupin);
+    IdTail → LPAREN ArgList RPAREN ArgGroups (add(1)(2)); za poslední skupinou
+    NESMÍ pokračovat výraz (FUNEXP).
+  - VALMEM/EXTKW: postfix .člen patří výrazové analýze - FIRST(ExprFromId)
+    += DOT; greedy: after_member povolí (args) za .členem (x.plus(2),
+    x.plus(1)(2)); LPAREN za běžným operandem výraz stále končí.
+  - EXTKW blok: ExtensionDef → EXTENSION LPAREN Param RPAREN EOL INDENT
+    ExtDefs DEDENT; FuncDefs += ExtensionDef.
+
 
 v7:
   - FuncDef: AT ID OptEol DEF … - anotace @main může být na samostatném
@@ -27,13 +37,23 @@ P = [
     ("Prolog",        ("IMPORT", "ID", "DOT", "MUL", "EOL")),
     ("FuncDefs",      ("EOL", "FuncDefs")),
     ("FuncDefs",      ("FuncDef", "FuncDefs")),
+    ("FuncDefs",      ("ExtensionDef", "FuncDefs")),   # v9 EXTKW: extension blok mezi definicemi
     ("FuncDefs",      ()),
     ("FuncDef",       ("DEF", "ID", "Params", "RetType", "ASSIGN", "Body")),
     ("FuncDef",       ("AT", "ID", "OptEol", "DEF", "ID", "Params", "RetType", "ASSIGN", "Body")),
+    # v9 EXTKW: extension (p: T) + odsazené def metody; tvar = ukázka §5.9 PDF
+    ("ExtensionDef",  ("EXTENSION", "LPAREN", "Param", "RPAREN", "EOL", "INDENT", "ExtDefs", "DEDENT")),
+    ("ExtDefs",       ("EOL", "ExtDefs")),
+    ("ExtDefs",       ("FuncDef", "ExtDefs")),      # @main uvnitř = sémantika, ne tvar
+    ("ExtDefs",       ()),
     # v7: anotace @main může být na samostatném řádku (§2 PDF) - OptEol = EOL | ε
     ("OptEol",        ("EOL",)),
     ("OptEol",        ()),
-    ("Params",        ("LPAREN", "ParamList", "RPAREN")),
+    # v9 PARAMLISTS: 0..n skupin parametrů - Params je nullable celek
+    # (def answer = 42 má nula skupin); FOLLOW(Params) = {COLON, ASSIGN}
+    ("Params",        ("ParamGroup", "Params")),
+    ("Params",        ()),
+    ("ParamGroup",    ("LPAREN", "ParamList", "RPAREN")),
     ("ParamList",     ("Param", "ParamRest")),
     ("ParamList",     ()),
     ("ParamRest",     ("COMMA", "AfterCommaParam")),
@@ -51,14 +71,27 @@ P = [
     ("Body",          ("Rhs", "EOL")),
     ("Body",          ("EOL", "INDENT", "Block", "DEDENT")),
     ("Block",         ("BlockItem", "StmtRest")),
-    ("BlockItem",     ("SimpleStmt", "EndSimple")),
+    ("BlockItem",     ("SimpleStmt", "LineEnd")),
     ("BlockItem",     ("IfStmt",)),
     ("BlockItem",     ("WhileStmt",)),
     ("StmtRest",      ("EOL", "StmtRest")),
     ("StmtRest",      ("BlockItem", "StmtRest")),
     ("StmtRest",      ()),
-    ("EndSimple",     ("EOL",)),
-    ("EndSimple",     ("SEMICOLON",)),
+    # v9: §1.2 - logický řádek nemůže začínat operátorem, ALE za středníkem
+    # (stejný řádek) jsou unární operátory povoleny. LL si nepamatuje, co
+    # snědl ukončovač → LineEnd/MidItem/MidSimple. Trailing ; řeší MidItem→EOL
+    # (ne ε - to by kontaminovalo FOLLOW stmt-starty a kolidovalo s MidSimple).
+    ("LineEnd",       ("EOL",)),                       # konec logického řádku
+    ("LineEnd",       ("SEMICOLON", "MidItem")),        # pokračování téhož řádku
+    ("MidItem",       ("MidSimple", "LineEnd")),
+    ("MidItem",       ("IfStmt",)),
+    ("MidItem",       ("WhileStmt",)),
+    ("MidItem",       ("EOL",)),                        # trailing ; - řádek končí
+    ("MidSimple",     ("ValStmt",)),
+    ("MidSimple",     ("VarStmt",)),
+    ("MidSimple",     ("ReturnStmt",)),
+    ("MidSimple",     ("ID", "StmtIdTail")),
+    ("MidSimple",     ("ExprNoId",)),                   # unární povoleny - mid-line
     ("SimpleStmt",    ("ValStmt",)),
     ("SimpleStmt",    ("VarStmt",)),
     ("SimpleStmt",    ("ReturnStmt",)),
@@ -82,8 +115,13 @@ P = [
     ("RhsOpt",        ()),
     ("Rhs",           ("ID", "IdTail")),
     ("Rhs",           ("ExprNoId",)),
-    ("IdTail",        ("LPAREN", "ArgList", "RPAREN")),
+    # v9 PARAMLISTS: volání s více skupinami argumentů - add(1)(2).
+    # FOLLOW(ArgGroups) = {EOL, SEMICOLON}; za poslední skupinou NESMÍ pokračovat
+    # výraz (add(1)(2) + 3 = FUNEXP) → PLUS padne na prázdné buňce.
+    ("IdTail",        ("LPAREN", "ArgList", "RPAREN", "ArgGroups")),
     ("IdTail",        ("ExprFromId",)),
+    ("ArgGroups",     ("LPAREN", "ArgList", "RPAREN", "ArgGroups")),
+    ("ArgGroups",     ()),
     ("StmtIdTail",    ("ASSIGN", "Rhs")),
     ("StmtIdTail",    ("IdTail",)),
     ("ArgList",       ("Term", "ArgRest")),
@@ -114,7 +152,9 @@ PSEUDO = {
                                               # operátorem (logický řádek nezačíná operátorem)
     "ExprFromId":  {"PLUS", "MINUS", "MUL", "DIV", "LT", "LE", "GT", "GE",
                     "EQ", "NEQ", "EOL", "SEMICOLON",   # od uloženého ID; FOLLOW = {EOL,SEMI}
-                    "AND_TOKEN", "OR_TOKEN"},   # v8: && || pokračují od uloženého ID
+                    "AND_TOKEN", "OR_TOKEN",   # v8: && || pokračují od uloženého ID
+                    # v9 VALMEM/EXTKW: postfix .člen patří výrazové analýze
+                    "DOT"},
                                               # (THEN/DO vypuštěny - mrtvé buňky, v4)
 }
 TERMS = {s for _, r in P for s in r if s not in NT}
@@ -195,14 +235,45 @@ RELOPS = {"LT", "LE", "GT", "GE", "EQ", "NEQ"}
 OPERANDS = {"ID", "INT_NUM", "DOUBLE_NUM", "STRING_LITERAL",
              "TRUE_TOKEN", "FALSE_TOKEN"}    # v8: Bool literály jako operandy
 
+def _args(toks, i):
+    """v9: LPAREN ArgList RPAREN uvnitř výrazu - argumenty metody za .členem
+    (x.plus(2), x.f(1)(2)). V reálném parseru výrazová analýza volá SDÍLENÝ
+    parse_arg_list (stejná koncová čárka + EOL-flag jako IdTail-větev);
+    tady model: termy (včetně literálu () od v9), čárky, koncová čárka
+    jen s EOL-flagem (RPAREN!).
+    Vrací index za RPAREN, nebo None = syntaktická chyba."""
+    i += 1                                    # LPAREN
+    if toks[i][0] == "RPAREN":                # prázdný seznam argumentů
+        return i + 1
+    while True:
+        t = toks[i][0]
+        if t == "LPAREN" and toks[i + 1][0] == "RPAREN":   # v9: () = literál Unit
+            i += 2
+        elif t in OPERANDS:                   # Term
+            i += 1
+        else:
+            return None
+        t = toks[i][0]
+        if t == "RPAREN":
+            return i + 1
+        if t != "COMMA":
+            return None
+        i += 1                                # za čárkou
+        if toks[i][0] == "RPAREN":            # koncová čárka - jen s EOL-flagem
+            return i + 1 if toks[i][1] else None
+
+
 def greedy(toks, i, kind):
     """Aproximace výrazové analýzy: konzumuje výraz, na stopping tokenu se
     zastaví BEZ konzumace. kind=ExprFromId → začíná ve stavu 'operátor'
-    (ID už přečteno volajícím). Vrací (index, platnost) - platnost = False
-    znamená syntakticky neúplný/neplatný výraz."""
+    (ID už přečteno volajícím). Vrací (index, platnost).
+    v9: postfixový řetězec - .člen (VALMEM/EXTKW) a za ním argumentové
+    skupiny (x.plus(2), x.plus(1)(2)); LPAREN za BĚŽNÝM operandem výraz
+    končí (volání ve výrazu = FUNEXP, až )."""
     depth = 0
     inside = [0]      # počet tokenů uvnitř úrovně závorek (detekce (1 +))
-    rels = [0]        # relační operátory na úrovni (řetězení zakázáno, §3)
+    rels = [0]        # relační operátory v řetězu (řetězení zakázáno, §3)
+    after_member = False      # v9: poslední postfix byl .člen → ( = argumenty
     expecting = "operand" if kind != "ExprFromId" else "operator"
     while i < len(toks):
         t = toks[i][0]
@@ -211,6 +282,7 @@ def greedy(toks, i, kind):
                 i += 1
                 inside[-1] += 1
                 expecting = "operator"
+                after_member = False          # v9: nový operand ruší .člen-kontext
             elif t in ("PLUS", "MINUS", "NOT_TOKEN"):   # unární + - !
                 i += 1
                 inside[-1] += 1
@@ -240,15 +312,31 @@ def greedy(toks, i, kind):
                 elif t in ("AND_TOKEN", "OR_TOKEN"):
                     rels[-1] = 0               # v8.1: && || uzavírají relační řetěz (§5.2)
                 expecting = "operand"
+                after_member = False            # v9: operátor ruší .člen-kontext
+            elif t == "DOT":                    # v9: .člen - postfix VALMEM/EXTKW
+                i += 1
+                if i < len(toks) and toks[i][0] == "ID":
+                    i += 1
+                    inside[-1] += 2
+                    after_member = True          # teď může následovat (args)
+                else:
+                    return i, False              # visící tečka - neúplný výraz
+            elif t == "LPAREN" and after_member: # v9: argumenty metody rozšíření
+                j = _args(toks, i)
+                if j is None:
+                    return i, False              # chybné argumenty
+                i = j                            # after_member zůstává (x.f(1)(2))
+                inside[-1] += 2
             elif t == "RPAREN" and depth > 0:
-                if rels[-1] > 1:                   # (a < b < c) - řetězení uvnitř
+                if rels[-1] > 1:                 # (a < b < c) - řetězení uvnitř
                     return i, False
                 i += 1
                 depth -= 1
                 inside.pop()
                 rels.pop()
+                after_member = False            # v9: uzavřený výraz není .člen → () za ním = FUNEXP chyba
             else:
-                break                               # i LPAREN po operandu → konec (volání ve výrazu neexistuje)
+                break                               # i LPAREN po operandu → konec (FUNEXP až )
     if expecting != "operator" or depth != 0 or any(r > 1 for r in rels):
         return i, False
     return i, True
@@ -303,7 +391,7 @@ TESTS = [
     ("středník + EOL + příkaz", W.format("VAL ID ASSIGN INT_NUM SEMICOLON EOL VAL ID ASSIGN INT_NUM EOL"), True),
     ("return se středníkem", W.format("RETURN INT_NUM SEMICOLON RETURN EOL"), True),
     ("return s voláním (strings.scala:12,37 subStr)", W.format("RETURN ID LPAREN ID COMMA INT_NUM COMMA ID RPAREN EOL"), True),
-    ("return volání, EndSimple = ;", W.format("RETURN ID LPAREN ID RPAREN SEMICOLON"), True),
+    ("return volání, EndSimple = ; (realistický stream s EOL před DEDENT)", W.format("RETURN ID LPAREN ID RPAREN SEMICOLON EOL"), True),
     ("return a + f(1) → chyba 2 (volání ve výrazu)", W.format("RETURN ID PLUS ID LPAREN INT_NUM RPAREN EOL"), False),
     ("return f(1) + 2 → chyba 2", W.format("RETURN ID LPAREN INT_NUM RPAREN PLUS INT_NUM EOL"), False),
     ("volání v podmínce → chyba 2 (FUNEXP až rozšíření)", W.format("IF ID LPAREN INT_NUM RPAREN THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT ELSE EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT"), False),
@@ -392,6 +480,46 @@ TESTS = [
     ("FIX: -5 jako samostatný řádek → chyba 2 (§1.2, mezera z v7)", W.format("MINUS INT_NUM EOL"), False),
     ("FIX: kontrola - val x = !true stále OK (mid-line)", W.format("VAL ID ASSIGN NOT_TOKEN TRUE_TOKEN EOL"), True),
     ("FIX: kontrola - if !x then stále OK", W.format("IF NOT_TOKEN ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT ELSE EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT"), True),
+    # ---- v9: PARAMLISTS + VALMEM + EXTKW (spec §5.4/§5.9/§5.10) ----
+    ("PL: def bez seznamu parametrů (def answer = 42)", "IMPORT ID DOT MUL EOL DEF ID ASSIGN INT_NUM EOL", True),
+    ("PL: dvě skupiny (def add(a: Int)(b: Int) = a + b)", "IMPORT ID DOT MUL EOL DEF ID LPAREN ID COLON INT_TOKEN RPAREN LPAREN ID COLON INT_TOKEN RPAREN ASSIGN ID PLUS ID EOL", True),
+    ("PL: prázdná + neprázdná skupina (def f()(x: Int) = x)", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN LPAREN ID COLON INT_TOKEN RPAREN ASSIGN ID EOL", True),
+    ("PL: tři skupiny (def f()()(x: Int) = 1)", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN LPAREN RPAREN LPAREN ID COLON INT_TOKEN RPAREN ASSIGN INT_NUM EOL", True),
+    ("PL: koncová čárka v druhé skupině (EOL před ))", "IMPORT ID DOT MUL EOL DEF ID LPAREN ID COLON INT_TOKEN RPAREN LPAREN ID COLON INT_TOKEN COMMA RPAREN! COLON INT_TOKEN ASSIGN INT_NUM EOL", True),
+    ("PL: val x = add(1)(2) - volání se dvěma skupinami", W.format("VAL ID ASSIGN ID LPAREN INT_NUM RPAREN LPAREN INT_NUM RPAREN EOL"), True),
+    ("PL: volací příkaz add(1)(2)", W.format("ID LPAREN INT_NUM RPAREN LPAREN INT_NUM RPAREN EOL"), True),
+    ("PL: add(1)(2) + 3 → chyba 2 (volání ve výrazu = FUNEXP)", W.format("VAL ID ASSIGN ID LPAREN INT_NUM RPAREN LPAREN INT_NUM RPAREN PLUS INT_NUM EOL"), False),
+    ("PL: val x = answer - 0-skupinová fce = syntakticky id (dispatch symtable)", W.format("VAL ID ASSIGN ID EOL"), True),
+    ("PL: answer + 1 - 0-skupinová fce ve výrazu (PDF: i bez FUNEXP)", W.format("VAL ID ASSIGN ID PLUS INT_NUM EOL"), True),
+    ("PL: @main s nula skupinami (syntakticky OK; sémantika přijímá - 0 skupin = bez parametrů)", "IMPORT ID DOT MUL EOL AT ID DEF ID COLON UNIT_TOKEN ASSIGN EOL INDENT LPAREN RPAREN EOL DEDENT", True),
+    ("VM: val s = x.toString", W.format("VAL ID ASSIGN ID DOT ID EOL"), True),
+    ("VM: literál.člen (\"abc\".length)", W.format("VAL ID ASSIGN STRING_LITERAL DOT ID EOL"), True),
+    ("VM: řetěz členů x.toString.length", W.format("VAL ID ASSIGN ID DOT ID DOT ID EOL"), True),
+    ("VM: (a + b).toString - člen na závorce", W.format("VAL ID ASSIGN LPAREN ID PLUS ID RPAREN DOT ID EOL"), True),
+    ("VM: x.toString jako příkaz", W.format("ID DOT ID EOL"), True),
+    ("VM: .toString na začátku RHS → chyba 2 (tečka nezačíná výraz)", W.format("VAL ID ASSIGN DOT ID EOL"), False),
+    ("VM: x. visící tečka → neúplný výraz", W.format("VAL ID ASSIGN ID DOT EOL"), False),
+    ("VM: f(1).toString → chyba 2 (postfix na výsledku volání = FUNEXP)", W.format("VAL ID ASSIGN ID LPAREN INT_NUM RPAREN DOT ID EOL"), False),
+    ("EXT: extension blok s jednou metodou", "IMPORT ID DOT MUL EOL EXTENSION LPAREN ID COLON INT_TOKEN RPAREN EOL INDENT DEF ID LPAREN ID COLON INT_TOKEN RPAREN COLON INT_TOKEN ASSIGN EOL INDENT ID PLUS ID EOL DEDENT DEDENT", True),
+    ("EXT: extension se dvěma metodami a prázdným řádkem", "IMPORT ID DOT MUL EOL EXTENSION LPAREN ID COLON DOUBLE_TOKEN RPAREN EOL INDENT DEF ID LPAREN ID COLON DOUBLE_TOKEN RPAREN ASSIGN ID EOL EOL DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL DEDENT", True),
+    ("EXT: val y = x.plus(2)", W.format("VAL ID ASSIGN ID DOT ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("EXT: x.plus(2) jako příkaz", W.format("ID DOT ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("EXT: více skupin u metody (x.plus(1)(2))", W.format("VAL ID ASSIGN ID DOT ID LPAREN INT_NUM RPAREN LPAREN INT_NUM RPAREN EOL"), True),
+    ("EXT: literál jako přijímač (1.plus(2))", W.format("VAL ID ASSIGN INT_NUM DOT ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("EXT: více argumentů metody (x.plus(2, 3))", W.format("VAL ID ASSIGN ID DOT ID LPAREN INT_NUM COMMA INT_NUM RPAREN EOL"), True),
+    ("EXT: koncová čárka v args metody (EOL před ))", W.format("VAL ID ASSIGN ID DOT ID LPAREN INT_NUM COMMA RPAREN! EOL"), True),
+    ("EXT: koncová čárka v args metody na jednom řádku → chyba 2", W.format("VAL ID ASSIGN ID DOT ID LPAREN INT_NUM COMMA RPAREN EOL"), False),
+    ("EXT: extension bez INDENT → chyba 2", "IMPORT ID DOT MUL EOL EXTENSION LPAREN ID COLON INT_TOKEN RPAREN EOL DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL", False),
+    ("EXT: extension uvnitř funkce → chyba 2 (jen na vrcholu)", W.format("EXTENSION LPAREN ID COLON INT_TOKEN RPAREN EOL INDENT DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL DEDENT"), False),
+    ("EXT: prázdný extension blok - ExtDefs→ε projde (nedosažitelné ze scanneru)", "IMPORT ID DOT MUL EOL EXTENSION LPAREN ID COLON INT_TOKEN RPAREN EOL INDENT DEDENT", True),
+    # ---- v9 fixes (externí review) ----
+    ("FIX: print(1); !true - unární za středníkem OK (§1.2)", W.format("ID LPAREN INT_NUM RPAREN SEMICOLON NOT_TOKEN TRUE_TOKEN EOL"), True),
+    ("FIX: val x = 1; -x - unární za středníkem OK", W.format("VAL ID ASSIGN INT_NUM SEMICOLON MINUS ID EOL"), True),
+    ("FIX: val x = 1; -5; !flag - řetěz za ;", W.format("VAL ID ASSIGN INT_NUM SEMICOLON MINUS INT_NUM SEMICOLON NOT_TOKEN ID EOL"), True),
+    ("FIX: 1.take(()) - () jako term v args metody", W.format("INT_NUM DOT ID LPAREN LPAREN RPAREN RPAREN EOL"), True),
+    ("FIX: (\"x\".length)() - args přes uzavřenou závorku → chyba 2 (FUNEXP)", W.format("VAL ID ASSIGN LPAREN STRING_LITERAL DOT ID RPAREN LPAREN RPAREN EOL"), False),
+    ("FIX: kontrola - 1.m(2)(3) řetěz skupin metody stále OK", W.format("INT_NUM DOT ID LPAREN INT_NUM RPAREN LPAREN INT_NUM RPAREN EOL"), True),
+    ("FIX: kontrola - !true na vlastním řádku stále chyba 2", W.format("NOT_TOKEN TRUE_TOKEN EOL"), False),
 ]
 
 # ---------------------------- výstup ----------------------------
