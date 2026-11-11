@@ -1,7 +1,7 @@
-# IFJ26 LL gramatika (v10)
+# IFJ26 LL gramatika (v11)
 
-Verze: v10, základní zadání + BOOLTHEN + PARAMLISTS + VALMEM + EXTKW + FUNEXP
-( volání jako postfix výrazu, argumenty = výrazy).
+Verze: v11, základní zadání + BOOLTHEN + PARAMLISTS + VALMEM + EXTKW + FUNEXP + CONTROL
+(jednořádková těla if, if-výraz, for-cyklus se strážemi).
 
 Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 a §13):
 
@@ -10,10 +10,11 @@ Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 
 | `if` bez `else`, `else if`, Boolean literály a `!` | BOOLTHEN (§13) |
 | 0..n skupin parametrů, `def f = 42`; `.člen` postfix; `extension` bloky | PARAMLISTS + VALMEM + EXTKW (§14) |
 | volání ve výrazu, výrazy jako argumenty | FUNEXP (§15) |
+| jednořádková těla if, `if` jako výraz, `for` s generátory a strážemi | CONTROL (§16) |
 
-Verifikace: `ll_check.py`, 146 tokenových streamů. Ověřuje bezkoliznost
+Verifikace: `ll_check.py`, 179 tokenových streamů. Ověřuje bezkoliznost
 LL tabulky (FIRST/FOLLOW, SELECT, 0 kolizí) a přijetí nebo odmítnutí vstupů
-tabulkovým parserem (146/146, §9). Rozsah záruky: bezkoliznost platí pro
+tabulkovým parserem (179/179, §9). Rozsah záruky: bezkoliznost platí pro
 modelované rozhraní (pseudoterminály mají FIRST ručně, výrazová analýza je
 aproximována automatem operandů a operátorů). Skript neověřuje sémantiku ani
 úplnost IFJ26; výrazy v celé šíři řeší precedenční tabulka.
@@ -181,16 +182,21 @@ SimpleStmt → ValStmt | VarStmt | ReturnStmt
            | ExprStmt                        (* výrazový příkaz - bez unárních
                                               operátorů, §1.2: logický řádek
                                               nezačíná operátorem (v8.1) *)
+ForStmt   → FOR ForHead                      (* v11 CONTROL *)
 ValStmt    → VAL ID ValVarTail
 VarStmt    → VAR ID ValVarTail
 ValVarTail → COLON Type ASSIGN Rhs            (* s typem, jeden logický řádek *)
            | ASSIGN Rhs                       (* bez typu *)
-IfStmt     → IF Expr THEN EOL INDENT Block DEDENT IfTail
-IfTail     → ELSE IfBranch                   (* v8 BOOLTHEN: else volitelné *)
+IfStmt     → IF Expr THEN IfThen
+IfThen     → EOL INDENT Block DEDENT IfTail   (* v11: then = blok *)
+           | Rhs IfElseOpt                    (* v11: then = jednořádek *)
+IfTail     → ELSE IfElse                      (* po blokové větvi *)
            | ε
-IfBranch   → EOL INDENT Block DEDENT      (* obyčejné else ukončuje řetěz (v8.1) *)
-           | IfStmt                          (* else if - celé if rekurzivně,
-                                              má svůj vlastní IfTail *)
+IfElseOpt  → ELSE IfElse                      (* po jednořádkové větvi *)
+           | EOL                              (* bez else - BOOLTHEN; EOL patří větvi *)
+IfElse     → EOL INDENT Block DEDENT          (* else = blok, ukončuje řetěz *)
+           | IfStmt                           (* else if - řetěz *)
+           | ExprNoIf EOL                     (* else = jednořádek, ne if-výraz *)
 WhileStmt  → WHILE Expr DO EOL INDENT Block DEDENT
 ReturnStmt → RETURN RhsOpt                   (* výraz i volání *)
 RhsOpt     → Rhs
@@ -347,8 +353,18 @@ Původní řešení (termy) platila do v9; FUNEXP ji nahrazuje.
 | Param | `ID` | `COMMA RPAREN` | ne |
 | RetType | `COLON` | `ASSIGN` | ano |
 | Type | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN BOOLEAN_TOKEN` | `ASSIGN COMMA RPAREN` | ne |
+| IfThen | `EOL` ∪ FIRST(Rhs) | stmt-starty, `DEDENT EOL` | ne |
 | IfTail | `ELSE` | stmt-starty, `DEDENT EOL` | ano |
-| IfBranch | `EOL IF` | stmt-starty, `DEDENT EOL` | ne |
+| IfElseOpt | `ELSE` ∪ `EOL` | stmt-starty, `DEDENT EOL` | ne |
+| IfElse | `EOL` ∪ `IF` ∪ FIRST(Expr)−`IF` | stmt-starty, `DEDENT EOL` | ne |
+| ForStmt | `FOR` | stmt-starty, `DEDENT EOL` | ne |
+| ForHead | `EOL` ∪ `ID` | stmt-starty, `DEDENT EOL` | ne |
+| ForGen | `ID` | `IF EOL DEDENT` | ne |
+| ForGuardRest | `EOL IF` | `DEDENT` | ano |
+| DoBody | `EOL` ∪ FIRST(Rhs) | stmt-starty, `DEDENT EOL` | ne |
+| Range | FIRST(Expr) | `EOL DO` | ne |
+| RangeDir | `TO UNTIL` | FIRST(Expr) | ne |
+| RangeBy | `BY` | `EOL DO` | ano |
 | Body | `EOL ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `AT DEF EOL EOF` | ne |
 | Block | `VAL VAR IF WHILE RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `DEDENT` | ne |
 | LineEnd | `EOL SEMICOLON` | stmt-starty, `DEDENT EOL` | ne |
@@ -492,7 +508,9 @@ Nelegální vstupy, všechny končí chybou 2:
 | ValStmt / VarStmt | `parse_val_stmt()` / `parse_var_stmt()` | společný `parse_val_var_tail()` |
 | ValVarTail | `parse_val_var_tail()` | jednořádkové (§4.1) |
 | IfStmt / WhileStmt | `parse_if_stmt()` / `parse_while_stmt()` | |
-| IfTail / IfBranch | `parse_if_tail()` / `parse_if_branch()` | else-if = rekurzivní `parse_if_stmt()` |
+| IfThen / IfElseOpt / IfElse | `parse_if_then()` / `parse_if_else()` | v11: jednořádek/blok/else-if řetěz |
+| ForStmt / ForHead / Range | `parse_for_stmt()` / `parse_for_head()` / `parse_range()` | v11: to/until/by = ID+strcmp |
+| DoBody / ForGuardRest | `parse_do_body()` / `parse_guards()` | |
 | ReturnStmt | `parse_return_stmt()` | ε-větev `RhsOpt` = holý return |
 | RhsOpt | inline | |
 | Rhs | `parse_rhs()` | v10: volání výrazové analýzy (alias Expr); symtable dispatch uvnitř ní |
@@ -786,3 +804,78 @@ rozlišení `(x: Int) => …` od `(x + 1)` vyžaduje najít párovou `)`
 a zkusit `=>` - LL tabulka to neumí, recursive descent výrazové
 analýzy ano. CONTROL (if-výraz) a LISTS (indexování `lst(2)`)
 z téhoě konvergence těží.
+
+## 16. Rozšíření CONTROL
+
+Specifikace §5.3: if lze použít jako výraz (else povinný); jednořádková
+těla všech větví; for s jedním generátorem (`to`/`until`/`by`) a strážemi.
+
+### 16.1 Jednořádková těla if (příkazová rovina)
+
+EOL-asymetrie (§4): bloková větev končí DEDENT (nic za ní - `IfTail → ε`),
+jednořádková EOL - terminátor patří větvi jako u `Body → Rhs EOL`.
+Proto dvě téměř shodná pravidla (`IfTail` ε × `IfElseOpt` EOL) - LL
+je amnestická, tentýž vzor jako `LineEnd`/`MidSimple` (v9.1). Důsledek:
+`if c then a; b` = chyba 2 (jednořáková větev je jeden výraz - konzistentní
+s těly funkcí). Visící `else` (`if c then x⏎else y`) = chyba 2 -
+if bez else je po EOL dokončen (konzistentní se Scalou).
+
+### 16.2 if jako výraz (výrazová rovina)
+
+`IF` vstupuje do FIRST(Expr) - if-výraz je operand výrazové analýzy
+(srov. volání ve FUNEXP, `.člen` ve VALMEM - třetí potvrzení §14.4).
+Skládá se všude: `(if c then a else b) + 1`, `f(if c then a else b)`,
+`return if …`. Ve výrazové rovině je else povinný; `else-if` rekurzí.
+`+ 1` patří do else-větve (`if c then a else b + 1` - else-větví je
+`b + 1`). Struktura: `IF cond⟨stop na THEN⟩ THEN větev ELSE větev` -
+větev = jednořádek (greedy) nebo break-form (`EOL INDENT výraz EOL
+DEDENT`, spec ukázky abs2/abs3 - obojí potvrzeno: break může být za THEN
+i za ELSE).
+
+### 16.3 BROKE - odchylka od LL (v11.1 opraveno po review)
+
+Break-form spolkne EOL své větve - a to je EOL, které by ukončovalo
+nadřazený příkaz. `val abs2 = if … then⏎ 0 - x⏎ else⏎ x` proto končí
+DEDENTem jako víceřádkový příkaz (jako if/while) - bez LineEnd. LL
+to předem rozhodnout nedokáže: **řešením je test na poslední token
+výrazu = DEDENT** (v11.1; původní booleovský příznak BROKE byl po review
+nahrazen - rozhoduje jak skončil CELÝ výraz, ne zda někde uvnitř byl
+break). Terminátor se vynechá jen když aktuální token není EOL
+(prázdný řádek se konzumuje normálně). Tabulka se nemění - odchylka
+třídy symtable dispatch (§5.1; fórum: odchylky povoleny, pokud popsané).
+
+Blokové větve = plný Block (v11.1): `break-form = EOL INDENT Block
+DEDENT` - blok obsahuje i příkazy (val, if, …), hodnotu větve určuje
+poslední příkaz (§2.3). Blok zpracovává syntaktická analýza
+(kontrakt: výrazová volá statement parser pro blokové větve if-výrazu).
+
+### 16.4 ForStmt
+
+Dva tvary hlavičky: jednořádkový (`for i <- 1 to 10 by 2 do`) a
+víceřádkový (generátor a stráže na vlastních logických řádcích
+odsazené pod `for`, `do` na úrovni `for` - control.scala). Lookahead
+za FOR: `{EOL}` × `{ID}`. Stráže 0..n, jen ve víceřádkové hlavičce
+(inline stráž → prázdná buňka; spec stráže popisuje jen u víceřádkového
+zápisu). Tělo (`DoBody`) zrcadlí `Body`: blok nebo jednořádek.
+Jeden generátor, žádné yield, for není výraz (vše chyba 2 - spec).
+
+### 16.5 Range: to/until/by = ID + kontrola atributu
+
+`Range → Expr RangeTail`, `RangeTail → TO Expr RangeBy | UNTIL Expr`
+(v kódu ID + `strcmp`, technika `ifj26`/`main` - doporučení učitele
+z fora). By jen u `to` - §5.3 výslovně uvádí krok pouze u inkluzivního
+tvaru `from to to by step`; `until` bez `by` (v11.1 po review). Kompozice s výrazy je zdarma: `to`/`until`/`by` jsou
+neoperátory - výraz se na nich zastaví bez jediného nového stopping
+pravidla. PDF: „Všechny meze i krok jsou výrazy typu Int" - plné
+výrazy včetně `by -2` a `by f()` (FUNEXP). `by 0`: literál → překladová
+kontrola → chyba 10 (§6); výraz → generovat runtime kontrolu → 40.
+Řídicí proměnná = nová nemodifikovatelná Int platná v těle (zápis → 7).
+
+### 16.6 Kontrakt s výrazovou analýzou (doplněk)
+
+| oblast | v10 | v11 |
+|---|---|---|
+| primární výrazy | id, literály, `()`, volání | **+ IF** (if-výraz, rekurze) |
+| stopping tokeny | EOL, SEMI, THEN, DO, COMMA, RPAREN | + ELSE (automaticky - neoperátor) |
+| layout tokeny | nikdy uvnitř výrazu | jediná výjimka: break-form (jen hloubka 0) |
+| after_operand | po operandu/volání/.členu | + po if-výrazu |

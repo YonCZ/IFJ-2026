@@ -8,29 +8,7 @@ Pseudoterminály Expr / ExprNoId / ExprFromId modelují rozhraní s výrazovou
 (precedenční) analýzou: stavový automat operand⇄operátor s hloubkou závorek.
 LPAREN po operandu výraz ukončuje - volání ve výrazu v základu neexistuje.
 RPAREN! = uzavírací závorka se nastaveným EOL-flagem (varianta b).
-
-
-v9 :
-  - PARAMLISTS: Params → ParamGroup Params | ε (def answer = 42 = nula skupin);
-    IdTail → LPAREN ArgList RPAREN ArgGroups (add(1)(2)); za poslední skupinou
-    NESMÍ pokračovat výraz (FUNEXP).
-  - VALMEM/EXTKW: postfix .člen patří výrazové analýze - FIRST(ExprFromId)
-    += DOT; greedy: after_member povolí (args) za .členem (x.plus(2),
-    x.plus(1)(2)); LPAREN za běžným operandem výraz stále končí.
-  - EXTKW blok: ExtensionDef → EXTENSION LPAREN Param RPAREN EOL INDENT
-    ExtDefs DEDENT; FuncDefs += ExtensionDef.
-
-
-v7:
-  - FuncDef: AT ID OptEol DEF … - anotace @main může být na samostatném
-    řádku (§2: „Anotace může být na samostatném řádku nebo na stejném řádku
-    s klíčovým slovem def“).
-  - Term → … | LPAREN RPAREN - () je literál Unit (§1.1) a argumenty jsou
-    termy = literály či identifikátory (§2.3) ⇒ print(()) je legální.
-  - greedy() nyní VALIDUJE koncový stav výrazu (visící operátor, neuzavřená
-    závorka, (1 +), řetězení relačních operátorů) - dřív vracel jen pozici.
 """
-
 # ---------------------------- gramatika ----------------------------
 # (neterminál, pravá strana) - prázdná tuple = ε
 P = [
@@ -75,6 +53,7 @@ P = [
     ("BlockItem",     ("SimpleStmt", "LineEnd")),
     ("BlockItem",     ("IfStmt",)),
     ("BlockItem",     ("WhileStmt",)),
+    ("BlockItem",     ("ForStmt",)),
     ("StmtRest",      ("EOL", "StmtRest")),
     ("StmtRest",      ("BlockItem", "StmtRest")),
     ("StmtRest",      ()),
@@ -87,6 +66,7 @@ P = [
     ("MidItem",       ("MidSimple", "LineEnd")),
     ("MidItem",       ("IfStmt",)),
     ("MidItem",       ("WhileStmt",)),
+    ("MidItem",       ("ForStmt",)),
     ("MidItem",       ("EOL",)),                        # trailing ; - řádek končí
     ("MidSimple",     ("ValStmt",)),
     ("MidSimple",     ("VarStmt",)),
@@ -103,13 +83,43 @@ P = [
     # v4: Newlines smazán - typ a = na jednom logickém řádku (§1.2, grammar.md §4.1)
     ("ValVarTail",    ("COLON", "Type", "ASSIGN", "Rhs")),
     ("ValVarTail",    ("ASSIGN", "Rhs")),
-    ("IfStmt",        ("IF", "Expr", "THEN", "EOL", "INDENT", "Block", "DEDENT", "IfTail")),
-    # v8 BOOLTHEN: else volitelné (IfTail→ε) + else if (rekurzivní IfStmt v IfBranch)
-    ("IfTail",        ("ELSE", "IfBranch")),
+    # v11 CONTROL: jednořádková těla větví if (§5.3). EOL-asymetrie: bloková
+    # větev končí DEDENT (nic za ní → IfTail ε), jednořádková EOL (terminátor
+    # patří větvi) → IfElseOpt→EOL. else if = řetěz (IfStmt); else-jednořádek
+    # nesmí být if-výraz (ExprNoIf) - jinak kolize s řetězem.
+    ("IfStmt",        ("IF", "Expr", "THEN", "IfThen")),
+    ("IfThen",        ("EOL", "INDENT", "Block", "DEDENT", "IfTail")),
+    ("IfThen",        ("Rhs", "IfElseOpt")),
+    ("IfTail",        ("ELSE", "IfElse")),
     ("IfTail",        ()),
-    ("IfBranch",      ("EOL", "INDENT", "Block", "DEDENT")),   # v8.1: obyčejné else ukončuje řetěz
-    ("IfBranch",      ("IfStmt",)),
+    ("IfElseOpt",     ("ELSE", "IfElse")),
+    ("IfElseOpt",     ("EOL",)),                        # bez else - BOOLTHEN 
+    ("IfElse",        ("EOL", "INDENT", "Block", "DEDENT")),
+    ("IfElse",        ("IfStmt",)),                      # else if - řetěz 
+    ("IfElse",        ("ExprNoIf", "EOL")),
     ("WhileStmt",     ("WHILE", "Expr", "DO", "EOL", "INDENT", "Block", "DEDENT")),
+    # v11 CONTROL: for s JEDNÍM generátorem a 0..n strážemi (§5.3). Dva tvary
+    # hlavičky: jednořádková (for i <- 1 to 10 by 2 do) a víceřádková (generátor
+    # a stráže na vlastních logických řádcích odsazené, do na úrovni for).
+    ("ForStmt",       ("FOR", "ForHead")),
+    ("ForHead",       ("EOL", "INDENT", "ForGen", "ForGuardRest", "DEDENT", "DO", "DoBody")),
+    ("ForHead",       ("ForGenInline", "DO", "DoBody")),
+    ("ForGen",        ("ID", "LARROW", "Range", "EOL")),
+    ("ForGenInline",  ("ID", "LARROW", "Range")),
+    ("ForGuardRest",  ("EOL", "ForGuardRest")),
+    ("ForGuardRest",  ("IF", "Expr", "EOL", "ForGuardRest")),
+    ("ForGuardRest",  ()),
+    ("DoBody",        ("EOL", "INDENT", "Block", "DEDENT")),
+    ("DoBody",        ("Rhs", "EOL")),                   # jednořádkové tělo (jako u if)
+    # Range: v modelu TO/UNTIL/BY tokeny; v reálném parseru ID + strcmp
+    # (technika ifj26/main, fórum „Klíčová slova pri rozšíření CONTROL").
+    # v11.1: by jen u inkluzivního tvaru (to ... by) - §5.3 výslovně
+    # uvádí krok pouze u "from to to by step"; until bez by
+    ("Range",         ("Expr", "RangeTail")),
+    ("RangeTail",     ("TO", "Expr", "RangeBy")),
+    ("RangeTail",     ("UNTIL", "Expr")),
+    ("RangeBy",       ("BY", "Expr")),
+    ("RangeBy",       ()),
     # v5: return umí i volání (strings.scala) - Rhs místo Expr; ε = holé return (otázka 1)
     ("ReturnStmt",    ("RETURN", "RhsOpt")),
     ("RhsOpt",        ("Rhs",)),
@@ -132,8 +142,9 @@ E0 = {"ID", "INT_NUM", "DOUBLE_NUM", "STRING_LITERAL", "LPAREN", "PLUS", "MINUS"
 B0 = {"TRUE_TOKEN", "FALSE_TOKEN", "NOT_TOKEN"}   # v8 BOOLTHEN: literály + unární !
 # interface pseudoterminály - mají FIRST, ale nemají vlastní pravidla
 PSEUDO = {
-    "Expr":        set(E0) | B0,               # výraz od aktuálního tokenu
-    "Rhs":         set(E0) | B0,               # v10: alias pro Expr (FUNEXP)
+    "Expr":        set(E0) | B0 | {"IF"},      # v11: + if-výraz (CONTROL §5.3)
+    "Rhs":         set(E0) | B0 | {"IF"},      # v10: alias pro Expr (FUNEXP)
+    "ExprNoIf":    set(E0) | B0,               # v11: else-větev-jednořádek bez if-výrazu
     "ExprNoId":    (set(E0) | B0) - {"ID"},    # totéž, volající zaručuje začátek != ID
     "ExprStmt":    (set(E0) | B0) - {"ID", "PLUS", "MINUS", "NOT_TOKEN"},
                                               # v8.1 §1.2: výrazový PŘÍKAZ nezačíná unárním
@@ -249,6 +260,43 @@ def _args(toks, i):
             return i + 1 if toks[i][1] else None
 
 
+def _if_branch(toks, i):
+    """v11 CONTROL: větev if-výrazu za THEN/ELSE. Jednořádek = greedy
+    (then se zastaví na ELSE, else na stopping tokenu kontextu) nebo
+    break-form = EOL INDENT Block DEDENT - plný blok i s příkazy (v11.1:
+    i s příkazy, §5.3; hodnotu větve určuje poslední příkaz, §2.3).
+    Blok zpracovává syntaktická analýza (_run s ["Block"]) - kontrakt:
+    výrazová analýza volá statement parser pro blokové větve.
+    Vrací (i, ok)."""
+    if toks[i][0] == "EOL":                       # break-form (§5.3: abs2/abs3)
+        if i + 1 < len(toks) and toks[i + 1][0] == "INDENT":
+            i, ok = _run(toks, i + 2, ["Block"])  # blok = i s příkazy (v11.1)
+            if ok and i < len(toks) and toks[i][0] == "DEDENT":
+                return i + 1, True
+        return i, False
+    i, ok = greedy(toks, i, "Expr")               # jednořáková větev
+    return i, ok
+
+
+def _if_expr(toks, i):
+    """v11 CONTROL: if-výraz - IF už snědl volající (operand-stav greedy).
+    IF cond THEN větev ELSE větev - ve výrazové rovině je else POVINNÉ
+    (§5.3). Vnořený else-if rekurzí přes greedy (IF v operand-stavu).
+    Vrací (i, ok)."""
+    i, ok = greedy(toks, i, "Expr")                # podmínka - zastaví se na THEN
+    if not ok or toks[i][0] != "THEN":
+        return i, False
+    i += 1
+    i, ok = _if_branch(toks, i)                    # then-větev
+    if not ok:
+        return i, False
+    if toks[i][0] != "ELSE":                       # výraz: else povinný
+        return i, False
+    i += 1
+    i, ok = _if_branch(toks, i)                    # else-větev
+    return i, ok
+
+
 def greedy(toks, i, kind):
     """Aproximace výrazové analýzy: konzumuje výraz, na stopping tokenu se
     zastaví BEZ konzumace. kind=ExprFromId → začíná ve stavu 'operátor'
@@ -265,7 +313,15 @@ def greedy(toks, i, kind):
     while i < len(toks):
         t = toks[i][0]
         if expecting == "operand":
-            if t in OPERANDS:
+            if t == "IF":                        # v11: if-výraz = primární výraz
+                i += 1
+                i, ok = _if_expr(toks, i)
+                if not ok:
+                    return i, False
+                inside[-1] += 1
+                expecting = "operator"
+                after_operand = True
+            elif t in OPERANDS:
                 i += 1
                 inside[-1] += 1
                 expecting = "operator"
@@ -329,6 +385,44 @@ def greedy(toks, i, kind):
         return i, False
     return i, True
 
+def _run(toks, i, stack):
+    """Tabulkový LL parser nad toks od indexu i se zadaným zásobníkem.
+    Vrací (i, ok) - ok=False znamená syntaktickou chybu (index ukazuje
+    na místo chyby). V11.1: používá ho i _if_branch pro blokové větve
+    if-výrazu (kontrakt: výrazová analýza volá statement parser)."""
+    while stack:
+        top = stack.pop()
+        tok, flag = toks[i]
+        if top in PSEUDO:
+            i, ok = greedy(toks, i, top)
+            if not ok:
+                return i, False
+            # v11.1 BROKE: výraz skončil DEDENTem (break-form if-výrazu) →
+            # nadřazený příkaz končí jako víceřádkový (jako if/while).
+            # Terminátor (EOL/LineEnd na vrcholu) se vynechá, pokud aktuální
+            # token NENÍ EOL (prázdný řádek se konzumuje normálně).
+            # Pozor: rozhoduje POSLEDNÍ token výrazu, ne "někde uvnitř
+            # byl break" (v11 bug - review). Dokumentovaná odchylka §16.3.
+            if (i > 0 and toks[i - 1][0] == "DEDENT" and toks[i][0] != "EOL"
+                    and stack and stack[-1] in ("EOL", "LineEnd")):
+                stack.pop()
+            continue
+        if top in TERMS:
+            if top == tok:
+                i += 1
+            else:
+                return i, False
+            continue
+        prod = table.get((top, tok))
+        if prod is None:
+            return i, False
+        if (top in ("AfterCommaParam",) and len(prod) == 0
+                and tok == "RPAREN" and not flag):
+            return i, False
+        stack.extend(reversed(prod))
+    return i, True
+
+
 def parse(stream):
     toks = []
     for t in stream.split():
@@ -337,32 +431,12 @@ def parse(stream):
         else:
             toks.append((t, False))
     toks.append(("EOF", False))
-    i, stack = 0, ["Program"]
-    while stack:
-        top = stack.pop()
-        tok, flag = toks[i]
-        if top in PSEUDO:
-            i, ok = greedy(toks, i, top)
-            if not ok:
-                return False, f"neúplný výraz (visící operátor / závorka / řetězení relací) @[{i}]"
-            continue
-        if top in TERMS:
-            if top == tok:
-                i += 1
-            else:
-                return False, f"očekáváno {top}, přišlo {tok} @[{i}]"
-            continue
-        prod = table.get((top, tok))
-        if prod is None:
-            return False, f"prázdná buňka: {top} × {tok} @[{i}]"
-        if (top in ("AfterCommaParam",) and len(prod) == 0
-                and tok == "RPAREN" and not flag):
-            return False, f"koncová čárka bez EOL před ) @[{i}]"
-        stack.extend(reversed(prod))
+    i, ok = _run(toks, 0, ["Program"])
+    if not ok:
+        return False, f"syntaktická chyba @[{i}] ({toks[i][0]})"
     if i == len(toks):
         return True, "OK"
     return False, "zbytky: " + " ".join(t[0] for t in toks[i:])
-
 # ---------------------------- testy ----------------------------
 W = ("IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN EOL INDENT {} DEDENT")
 
@@ -522,6 +596,46 @@ TESTS = [
     ("FX: f(1,) bez EOL-flagu → chyba 2", W.format("ID LPAREN INT_NUM COMMA RPAREN EOL"), False),
     ("FX: kontrola - x = y = 1 stále chyba 2 (přiřazení není výraz)", W.format("ID ASSIGN ID ASSIGN INT_NUM EOL"), False),
     ("FX: kontrola - f(1 (nezavřené) → neúplný výraz", W.format("VAL ID ASSIGN ID LPAREN INT_NUM EOL"), False),
+    # ---- v11 CONTROL (spec §5.3) ----
+    ("CTRL: sign - if-výraz s vnořeným else-if (control.scala:7)", W.format("VAL ID ASSIGN IF ID LT INT_NUM THEN MINUS INT_NUM ELSE IF ID EQ INT_NUM THEN INT_NUM ELSE INT_NUM EOL"), True),
+    ("CTRL: break-form obě větve (abs2)", W.format("VAL ID ASSIGN IF ID LT INT_NUM THEN EOL INDENT INT_NUM MINUS INT_NUM EOL DEDENT ELSE EOL INDENT ID EOL DEDENT"), True),
+    ("CTRL: break-form jen else (abs3)", W.format("VAL ID ASSIGN IF ID LT INT_NUM THEN INT_NUM MINUS INT_NUM ELSE EOL INDENT ID EOL DEDENT"), True),
+    ("CTRL: break-form, za ním další příkaz", W.format("VAL ID ASSIGN IF ID LT INT_NUM THEN EOL INDENT INT_NUM EOL DEDENT ELSE EOL INDENT ID EOL DEDENT VAL ID ASSIGN INT_NUM EOL"), True),
+    ("CTRL: break-form jako poslední příkaz bloku", W.format("VAL ID ASSIGN IF ID THEN EOL INDENT INT_NUM EOL DEDENT ELSE EOL INDENT ID EOL DEDENT"), True),
+    ("CTRL: if-příkaz, obě větve jednořájkové", W.format("IF ID THEN ID ELSE ID EOL"), True),
+    ("CTRL: if c then x (bez else, jednořádek, BOOLTHEN)", W.format("IF ID THEN ID EOL"), True),
+    ("CTRL: then blok + else jednořádek", W.format("IF ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT ELSE ID EOL"), True),
+    ("CTRL: then jednořádek + else blok", W.format("IF ID THEN ID ELSE EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT"), True),
+    ("CTRL: then blok + else if (řetěz za blokem)", W.format("IF ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT ELSE IF ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT"), True),
+    ("CTRL: if za středníkem", W.format("ID LPAREN INT_NUM RPAREN SEMICOLON IF ID THEN ID EOL"), True),
+    ("CTRL: if-výraz v závorce + aritmetika", W.format("VAL ID ASSIGN LPAREN IF ID THEN INT_NUM ELSE INT_NUM RPAREN PLUS INT_NUM EOL"), True),
+    ("CTRL: if-výraz jako argument", W.format("ID LPAREN IF ID THEN INT_NUM ELSE INT_NUM RPAREN EOL"), True),
+    ("CTRL: return if-výraz", W.format("RETURN IF ID THEN INT_NUM ELSE INT_NUM EOL"), True),
+    ("CTRL: if-výraz v podmínce while", W.format("WHILE IF ID THEN TRUE_TOKEN ELSE FALSE_TOKEN DO EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT"), True),
+    ("CTRL: for jednořáková hlavička (to + by -2)", W.format("FOR ID LARROW INT_NUM TO INT_NUM BY MINUS INT_NUM DO ID LPAREN ID RPAREN EOL"), True),
+    ("CTRL: for until jednořákové (bez by - §5.3)", W.format("FOR ID LARROW INT_NUM UNTIL INT_NUM DO ID LPAREN ID RPAREN EOL"), True),
+    ("CTRL: for víceřáková hlavička (gen + 2 stráže, control.scala)", W.format("FOR EOL INDENT ID LARROW INT_NUM TO ID BY ID EOL IF ID NEQ INT_NUM EOL IF ID LT INT_NUM EOL DEDENT DO EOL INDENT ID ASSIGN ID PLUS ID EOL DEDENT"), True),
+    ("CTRL: for výrazy v range", W.format("FOR ID LARROW ID PLUS ID TO ID MUL INT_NUM BY ID DO ID LPAREN ID RPAREN EOL"), True),
+    ("CTRL: for s prázdným řádkem v hlavičce", W.format("FOR EOL INDENT ID LARROW INT_NUM TO INT_NUM EOL EOL IF ID LT INT_NUM EOL DEDENT DO EOL INDENT ID EOL DEDENT"), True),
+    ("CTRL: for blokové tělo, vnořený for", W.format("FOR ID LARROW INT_NUM UNTIL INT_NUM DO EOL INDENT FOR ID LARROW INT_NUM TO INT_NUM DO ID LPAREN ID RPAREN EOL DEDENT"), True),
+    ("CTRL: for jednořákové tělo = výraz", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO ID PLUS ID EOL"), True),
+    ("CTRL: celý control.scala", "IMPORT ID DOT MUL EOL AT ID DEF ID LPAREN RPAREN COLON UNIT_TOKEN ASSIGN EOL INDENT VAL ID ASSIGN INT_NUM EOL VAL ID ASSIGN INT_NUM EOL VAL ID ASSIGN IF ID LT INT_NUM THEN MINUS INT_NUM ELSE IF ID EQ INT_NUM THEN INT_NUM ELSE INT_NUM EOL VAR ID ASSIGN INT_NUM EOL FOR EOL INDENT ID LARROW INT_NUM TO ID BY ID EOL IF ID NEQ INT_NUM EOL IF ID LT INT_NUM EOL DEDENT DO EOL INDENT ID ASSIGN ID PLUS ID EOL DEDENT ID LPAREN STRING_LITERAL RPAREN EOL ID LPAREN ID RPAREN EOL ID LPAREN STRING_LITERAL RPAREN EOL ID LPAREN ID RPAREN EOL ID LPAREN STRING_LITERAL RPAREN EOL FOR ID LARROW INT_NUM TO INT_NUM BY MINUS INT_NUM DO EOL INDENT ID LPAREN STRING_LITERAL RPAREN EOL ID LPAREN ID RPAREN EOL DEDENT ID LPAREN STRING_LITERAL RPAREN EOL ID LPAREN STRING_LITERAL RPAREN EOL FOR ID LARROW INT_NUM UNTIL INT_NUM DO EOL INDENT ID LPAREN STRING_LITERAL RPAREN EOL ID LPAREN ID RPAREN EOL DEDENT ID LPAREN STRING_LITERAL RPAREN EOL DEDENT", True),
+    ("CTRL NEG: if-výraz bez else", W.format("VAL ID ASSIGN IF ID THEN ID EOL"), False),
+    ("CTRL NEG: for bez do", W.format("FOR ID LARROW INT_NUM TO INT_NUM EOL"), False),
+    ("CTRL NEG: dva generátory", W.format("FOR EOL INDENT ID LARROW INT_NUM TO INT_NUM EOL ID LARROW INT_NUM TO INT_NUM EOL DEDENT DO EOL INDENT ID EOL DEDENT"), False),
+    ("CTRL NEG: inline stráž (jen víceřáková hlavička)", W.format("FOR ID LARROW INT_NUM TO INT_NUM IF ID LT INT_NUM DO ID EOL"), False),
+    ("CTRL NEG: for jako výraz", W.format("VAL ID ASSIGN FOR ID LARROW INT_NUM TO INT_NUM DO ID EOL"), False),
+    ("CTRL NEG: i <- 1 bez to/until", W.format("FOR ID LARROW INT_NUM DO ID EOL"), False),
+    ("CTRL NEG: while stále jen blok", W.format("WHILE ID DO ID EOL"), False),
+    ("CTRL NEG: if c then a; b (jednořáková větev = jeden výraz)", W.format("IF ID THEN ID SEMICOLON ID EOL"), False),
+    ("CTRL NEG: for tělo bez INDENT", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO VAL ID ASSIGN INT_NUM EOL"), False),
+    ("CTRL NEG: visící else (if c then x⏎else y - konzistentní se Scalou)", W.format("IF ID THEN ID EOL ELSE EOL INDENT ID EOL DEDENT"), False),
+    # ---- v11.1 fixes (externí review) ----
+    ("FIX: break-form větev = plný blok i s příkazy (val + výsledek)", W.format("VAL ID ASSIGN IF ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL ID PLUS ID EOL DEDENT ELSE EOL INDENT ID EOL DEDENT"), True),
+    ("FIX: BROKE - else-jednořádek po then-break-form: val y bez ; → chyba 2", W.format("VAL ID ASSIGN IF TRUE_TOKEN THEN EOL INDENT INT_NUM EOL DEDENT ELSE INT_NUM VAL ID ASSIGN INT_NUM EOL"), False),
+    ("FIX: BROKE - vnořený if-výraz v break-formu, pokračování print(x)", W.format("VAL ID ASSIGN IF TRUE_TOKEN THEN INT_NUM ELSE IF FALSE_TOKEN THEN EOL INDENT INT_NUM EOL DEDENT ELSE EOL INDENT INT_NUM EOL DEDENT ID LPAREN ID RPAREN EOL"), True),
+    ("FIX: until bez by (§5.3: krok jen u to)", W.format("FOR ID LARROW INT_NUM UNTIL INT_NUM BY INT_NUM DO ID EOL"), False),
+    ("FIX: kontrola - to + by stále OK", W.format("FOR ID LARROW INT_NUM TO INT_NUM BY INT_NUM DO ID EOL"), True),
 ]
 
 # ---------------------------- výstup ----------------------------
