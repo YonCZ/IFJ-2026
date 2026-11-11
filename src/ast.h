@@ -4,27 +4,9 @@
 #pragma once
 #include <stdbool.h>
 
-
-
-/*
-pomocna vec od clauda
-NODE_LITERAL	dtype + ival / fval / sval
-NODE_IDENT	    name
-NODE_BINOP	    op, left, right
-NODE_UNOP	    op, left
-NODE_VAR_DEF	name, is_const, left (inicializace)
-NODE_ASSIGN	    left (IDENT), right (výraz)
-NODE_IF	left    (podmínka), right (then), third (else)
-NODE_WHILE      left (podmínka), right (tělo)
-NODE_RETURN	    left (výraz nebo NULL)
-NODE_CALL	    name, left (první argument, další přes next)
-NODE_FUNC_DEF	name, left (parametry přes next), right (BLOCK)
-NODE_BLOCK	    left (první příkaz, další přes next)
-*/
-
-
 typedef enum{
-  NODE_PROGRAM,   //definition of variables at the start is in *next
+  NODE_NONE,
+  NODE_PROGRAM,
   NODE_FUNC_DEF,
   NODE_PARAM,
   NODE_BLOCK,
@@ -44,7 +26,7 @@ typedef enum{
 
   //CONTROL EXTENSION
   NODE_FOR,
-
+  NODE_RANGE,
 
   //INTERPOLADES
   NODE_INTERP,
@@ -54,6 +36,7 @@ typedef enum{
 typedef struct AST_NODE AST_NODE;
 
 typedef enum{
+  DATA_NONE,
   DATA_INT,
   DATA_DOUBLE,
   DATA_STRING,
@@ -62,6 +45,7 @@ typedef enum{
 } DATA_TYPE;
 
 typedef enum{
+  OP_NONE,
   OP_ADD,
   OP_SUB,
   OP_GT,
@@ -84,18 +68,28 @@ struct AST_NODE{
   AST_NODE *left;
   AST_NODE *right;
   AST_NODE *else_param;
-  AST_NODE *next;  //only for if (else) and for var decleration at the start fo function
+  AST_NODE *next;
 
   bool is_const; //only for NODE_DEF_VAR
-  int line;  //error line
-
+  int line;  //error line, PARSER will define it
+  bool is_main;
 
   DATA_TYPE data_type;
   OP_TYPE op_type;
 
+  bool is_extension; //extkw
+  bool is_method; //param
+  bool has_parens; //
+
+
+  //params
+  int list_no;
+  int more_lists;
+
   char *name;
+  bool inclusive;
 
-
+  int id;
   long long ival;
   double dval;
   char *sval;
@@ -109,15 +103,25 @@ AST_NODE * ast_int_literal_create( long long value,AST_NODE *next);
 AST_NODE * ast_double_literal_create(double value,AST_NODE *next);
 AST_NODE * ast_string_literal_create(char *value,AST_NODE *next);
 AST_NODE * ast_ident_create(AST_NODE *left, char *name,AST_NODE *next);
-AST_NODE * ast_binop_create(AST_NODE *lefr, AST_NODE *right, AST_NODE *next, OP_TYPE op);
+AST_NODE * ast_binop_create(AST_NODE *left, AST_NODE *right, AST_NODE *next, OP_TYPE op);
 AST_NODE * ast_unop_create(AST_NODE *left, AST_NODE *next, OP_TYPE op);
-AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is_const);
+AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is_const, DATA_TYPE declared);
 AST_NODE * ast_if_create(AST_NODE *cond, AST_NODE *then,  AST_NODE *els,AST_NODE *next);
 AST_NODE * ast_while_create(AST_NODE *left, AST_NODE *right,AST_NODE *next);
-AST_NODE * ast_func_def_create(AST_NODE *body, AST_NODE *return_type,  AST_NODE *params,AST_NODE *next, char *name );
-AST_NODE * ast_call_create( AST_NODE *params, char *name);
+AST_NODE * ast_func_def_create(AST_NODE *body, DATA_TYPE return_type,  AST_NODE *params,AST_NODE *next, char *name, bool is_main, bool has_parens);
+AST_NODE * ast_call_create( AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next);
+AST_NODE * ast_unit_literal_create(AST_NODE *next);
+AST_NODE *ast_param_create (DATA_TYPE type, char *name, AST_NODE *next);
+AST_NODE *ast_assign_create(AST_NODE *ident, AST_NODE *expr, AST_NODE *next);
+AST_NODE *ast_return_create(AST_NODE *left, AST_NODE *next);
+AST_NODE * ast_bool_literal_create(bool value,AST_NODE *next);
+AST_NODE *ast_for_create(AST_NODE *range, AST_NODE *body, AST_NODE *guards, AST_NODE *next, char *name);
+AST_NODE *ast_range_create(AST_NODE *from, AST_NODE *to, AST_NODE *step, AST_NODE *next, bool inclusive);
+AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
 
-//!!!!!! TODO OSTATNI FUNKCE TADY NEMAJI ZASTOUPENI
+
+
+
 void free_AST(AST_NODE *node);
 
 void print_AST(AST_NODE *node);

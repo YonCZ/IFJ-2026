@@ -3,11 +3,21 @@
 //
 #include "ast.h"
 
-#include <_string.h>
+#include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
 
 
+static char *ast_strdup(const char *ptr) {
+  if (!ptr) return NULL;
+  size_t len = strlen(ptr);
+  char *s = malloc(len + 1);
+  if (s == NULL) {
+    exit(99);
+  }
+  memcpy(s, ptr, len);
+  s[len] = '\0';
+  return s;
+}
 
 
 AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE type) {
@@ -24,11 +34,10 @@ AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE t
   return node;
 }
 
-
 void ast_name(AST_NODE *node, char *name) {
-  node->name = strdup(name);
-  if (node->name == NULL) {exit(99);}
+  node->name = ast_strdup(name);
 }
+
 
 
 AST_NODE * ast_int_literal_create( long long value,AST_NODE *next) {
@@ -36,37 +45,61 @@ AST_NODE * ast_int_literal_create( long long value,AST_NODE *next) {
   node->ival = value;
   node->data_type = DATA_INT;
   return node;
-};
+}
 
 AST_NODE * ast_double_literal_create(double value,AST_NODE *next) {
   AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
   node->dval = value;
   node->data_type = DATA_DOUBLE;
   return node;
-};
+}
 AST_NODE * ast_string_literal_create(char *value,AST_NODE *next) {
   AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
-  node->sval = strdup(value);
-  if (node->sval == NULL) {exit(99);}
+  node->sval = ast_strdup(value);
   node->data_type = DATA_STRING;
   return node;
-};
+}
+
+AST_NODE * ast_unit_literal_create(AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
+  node->data_type = DATA_UNIT;
+  return node;
+}
+
+AST_NODE * ast_bool_literal_create(bool value,AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
+  node->data_type = DATA_BOOL;
+  if (value) node->ival = 1;
+  else node->ival = 0;
+  return node;
+}
 
 
 AST_NODE * ast_ident_create(AST_NODE *left, char *name,AST_NODE *next){
   AST_NODE *node = ast_create(left,NULL,next, NODE_IDENT);
   ast_name(node, name);
   return node;
-};
+}
+
+AST_NODE *ast_assign_create(AST_NODE *ident, AST_NODE *expr, AST_NODE *next) {
+  AST_NODE *node = ast_create(ident, expr,next, NODE_ASSIGN);
+  return node;
+}
+
+//if nothing is returned then NULL
+AST_NODE *ast_return_create(AST_NODE *left, AST_NODE *next) {
+  AST_NODE *node = ast_create(left,NULL,next, NODE_RETURN);
+  return node;
+}
 
 //nevim jesetli prece neudelam pres tokeny
-AST_NODE * ast_binop_create(AST_NODE *lefr, AST_NODE *right, AST_NODE *next, OP_TYPE op)
+AST_NODE * ast_binop_create(AST_NODE *left, AST_NODE *right, AST_NODE *next, OP_TYPE op)
 {
-  AST_NODE *node = ast_create(lefr, right,next, NODE_BINOP);
+  AST_NODE *node = ast_create(left, right,next, NODE_BINOP);
   node->op_type = op;
 
   return node;
-};
+}
 
 
 AST_NODE * ast_unop_create(AST_NODE *left, AST_NODE *next, OP_TYPE op) {
@@ -74,44 +107,84 @@ AST_NODE * ast_unop_create(AST_NODE *left, AST_NODE *next, OP_TYPE op) {
   node->op_type = op;
   return node;
 
-};
+}
 
 
-AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is_const) {
+AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is_const, DATA_TYPE declared) { //semantic analyze must check if DATA_NONE
   AST_NODE *node = ast_create(left, NULL, next, NODE_VAR_DEF);
   ast_name(node, name);
   node->is_const = is_const;
+  node->data_type = declared;
   return node;
-};
+}
 
 AST_NODE * ast_if_create(AST_NODE *cond, AST_NODE *then,  AST_NODE *els,AST_NODE *next) {
   AST_NODE *node = ast_create(cond,then, next, NODE_IF);
   node->else_param = els;
   return node;
 
-};  //data type for CONTROL extension, nevim jeslti se to vezme ze sym. table nebo to budu muse implementovat zde
+} //data type for CONTROL extension, nevim jeslti se to vezme ze sym. table nebo to budu muse implementovat zde
 
 AST_NODE * ast_while_create(AST_NODE *left, AST_NODE *right,AST_NODE *next) {
   AST_NODE *node = ast_create(left,right, next, NODE_WHILE);
   return node;
-};
+}
 
-//main func should be the first
-AST_NODE * ast_func_def_create(AST_NODE *body, AST_NODE *return_type,
-                               AST_NODE *params,AST_NODE *next, char *name ) {
-  AST_NODE *node = ast_create(body,return_type, next, NODE_FUNC_DEF);
+AST_NODE * ast_func_def_create(AST_NODE *body, DATA_TYPE return_type,
+                               AST_NODE *params,AST_NODE *next, char *name, bool is_main, bool has_parens ) {
+  AST_NODE *node = ast_create(body,NULL, next, NODE_FUNC_DEF);
   ast_name(node, name);
   node->else_param = params;
+  node->data_type = return_type;
+  node->is_main = is_main;
+  node->has_parens = has_parens;
   return node;
-};
+}
 
-AST_NODE * ast_call_create(AST_NODE *params, char *name) {
-  AST_NODE *node = ast_create(NULL,NULL,NULL, NODE_CALL);
+AST_NODE *ast_param_create (DATA_TYPE type, char *name, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL,NULL, next, NODE_PARAM);
+  ast_name(node, name);
+  node->data_type = type;
+  return node;
+}
+
+//semantic analyze add var_id
+AST_NODE *ast_for_create(AST_NODE *range, AST_NODE *body, AST_NODE *guards, AST_NODE *next, char *name) {
+  AST_NODE *node= ast_create(range, body, next, NODE_FOR);
+  ast_name(node, name);
+  node->else_param = guards;
+  return node;
+}
+
+AST_NODE *ast_range_create(AST_NODE *from, AST_NODE *to, AST_NODE *step, AST_NODE *next, bool inclusive) {
+  AST_NODE *node = ast_create(from,to, next, NODE_RANGE);
+  node->else_param = step;
+  node->inclusive = inclusive;
+  return node;
+
+}
+
+//is_method x.plus(12) or plus(x, 12)
+AST_NODE * ast_call_create(AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL,NULL,next, NODE_CALL);
   ast_name(node, name);
   node->else_param = params;
+  node->is_method = is_method;
+  node->has_parens = has_parens;
   return node;
-}; //return type is in sym table
+}  //return type is in sym table
 
+AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next) {
+  if (!new_node) return next;
+  if (!next) return new_node;
+  if (!next->next) {
+    next->next = new_node;
+  }
+  else {
+    ast_append(new_node, next->next);
+  }
+  return next;
+}
 
 void free_AST(AST_NODE *node) {
   if (!node) {return;}
@@ -125,165 +198,3 @@ void free_AST(AST_NODE *node) {
 }
 
 
-//generated by Claude Sonnet 5.5 High
-//command - tady mas muj ast.h a udelej mi funkci ast_print
-
-
-/* Název druhu uzlu pro výpis. */
-static const char *node_type_name(NODE_TYPE t) {
-  switch (t) {
-  case NODE_PROGRAM:   return "PROGRAM";
-  case NODE_FUNC_DEF:  return "FUNC_DEF";
-  case NODE_PARAM:     return "PARAM";
-  case NODE_BLOCK:     return "BLOCK";
-  case NODE_VAR_DEF:   return "VAR_DEF";
-  case NODE_ASSIGN:    return "ASSIGN";
-  case NODE_IF:        return "IF";
-  case NODE_WHILE:     return "WHILE";
-  case NODE_RETURN:    return "RETURN";
-  case NODE_CALL:      return "CALL";
-  case NODE_EXPR_STMT: return "EXPR_STMT";
-  case NODE_BINOP:     return "BINOP";
-  case NODE_UNOP:      return "UNOP";
-  case NODE_LITERAL:   return "LITERAL";
-  case NODE_IDENT:     return "IDENT";
-  case NODE_FOR:       return "FOR";
-  case NODE_INTERP:    return "INTERP";
-  }
-  return "???";
-}
-
-/* Zápis operátoru pro výpis. */
-static const char *op_name(OP_TYPE op) {
-  switch (op) {
-  case OP_ADD: return "+";
-  case OP_SUB: return "-";
-  case OP_MUL: return "*";
-  case OP_DIV: return "/";
-  case OP_LT:  return "<";
-  case OP_LE:  return "<=";
-  case OP_GT:  return ">";
-  case OP_GE:  return ">=";
-  case OP_EQ:  return "==";
-  case OP_NEQ: return "!=";
-  case OP_AND: return "&&";
-  case OP_OR:  return "||";
-  case OP_NOT: return "!";
-  }
-  return "???";
-}
-
-/* Název datového typu pro výpis. */
-static const char *data_type_name(DATA_TYPE t) {
-  switch (t) {
-  case DATA_INT:    return "Int";
-  case DATA_DOUBLE: return "Double";
-  case DATA_STRING: return "String";
-  case DATA_BOOL:   return "Boolean";
-  case DATA_UNIT:   return "Unit";
-  }
-  return "???";
-}
-
-/* Popisek potomka podle druhu rodiče (which: 0 = left, 1 = right, 2 = else_param). */
-static const char *child_label(NODE_TYPE t, int which) {
-  static const char *generic[] = {"left", "right", "else"};
-  switch (t) {
-  case NODE_IF:
-    return which == 0 ? "cond" : which == 1 ? "then" : "else";
-  case NODE_WHILE:
-    return which == 0 ? "cond" : "body";
-    case NODE_FUNC_DEF:
-      return which == 0 ? "body" : which == 1 ? "type" : "params";
-    case NODE_CALL:
-      return which == 2 ? "args" : generic[which];
-  case NODE_VAR_DEF:
-    return which == 0 ? "init" : generic[which];
-  case NODE_ASSIGN:
-    return which == 0 ? "target" : which == 1 ? "value" : generic[which];
-  case NODE_BLOCK:
-    return which == 0 ? "stmts" : generic[which];
-  case NODE_RETURN:
-    return which == 0 ? "value" : generic[which];
-  case NODE_BINOP:
-    return which == 0 ? "lhs" : which == 1 ? "rhs" : generic[which];
-  case NODE_UNOP:
-    return which == 0 ? "operand" : generic[which];
-  default:
-    return generic[which];
-  }
-}
-
-/* Vypíše řetězec v uvozovkách, speciální znaky jako escape sekvence. */
-static void print_escaped(const char *s) {
-  fputc('"', stderr);
-  for (; s && *s; s++) {
-    switch (*s) {
-    case '\n': fputs("\\n", stderr);  break;
-    case '\r': fputs("\\r", stderr);  break;
-    case '\t': fputs("\\t", stderr);  break;
-    case '"':  fputs("\\\"", stderr); break;
-    case '\\': fputs("\\\\", stderr); break;
-    default:   fputc(*s, stderr);     break;
-    }
-  }
-  fputc('"', stderr);
-}
-
-static void print_chain(const AST_NODE *node, int depth, const char *label);
-
-/* Vypíše jeden uzel na řádek a rekurzivně jeho potomky (left, right, else_param). */
-static void print_one(const AST_NODE *n, int depth, const char *label) {
-  fprintf(stderr, "%*s", depth * 2, "");
-  if (label) {
-    fprintf(stderr, "%s: ", label);
-  }
-  fputs(node_type_name(n->type), stderr);
-
-  if (n->name) {
-    fprintf(stderr, " name=%s", n->name);
-  }
-
-  switch (n->type) {
-  case NODE_BINOP:
-  case NODE_UNOP:
-    fprintf(stderr, " op=%s", op_name(n->op_type));
-    break;
-  case NODE_VAR_DEF:
-    fputs(n->is_const ? " val" : " var", stderr);
-    break;
-  case NODE_LITERAL:
-    fprintf(stderr, " %s ", data_type_name(n->data_type));
-    switch (n->data_type) {
-    case DATA_INT:    fprintf(stderr, "%lld", n->ival);           break;
-    case DATA_DOUBLE: fprintf(stderr, "%g", n->dval);             break;
-    case DATA_STRING: print_escaped(n->sval);                     break;
-    case DATA_BOOL:   fputs(n->ival ? "true" : "false", stderr);  break;
-    case DATA_UNIT:   fputs("()", stderr);                        break;
-    }
-    break;
-  default:
-    break;
-  }
-
-  if (n->line > 0) {
-    fprintf(stderr, "  [line %d]", n->line);
-  }
-  fputc('\n', stderr);
-
-  print_chain(n->left, depth + 1, child_label(n->type, 0));
-  print_chain(n->right, depth + 1, child_label(n->type, 1));
-  print_chain(n->else_param, depth + 1, child_label(n->type, 2));
-}
-
-/* Vypíše řetěz uzlů propojených přes next na stejné úrovni odsazení. */
-static void print_chain(const AST_NODE *node, int depth, const char *label) {
-  for (; node; node = node->next) {
-    print_one(node, depth, label);
-  }
-}
-
-/* Ladicí výpis stromu na stderr; node i řetěz next může být NULL. */
-void print_AST(AST_NODE *node) {
-  print_chain(node, 0, NULL);
-}
