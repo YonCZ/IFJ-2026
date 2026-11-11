@@ -1,23 +1,23 @@
-# IFJ26 LL gramatika (v11)
+# IFJ26 LL gramatika
 
-Verze: v11, základní zadání + BOOLTHEN + PARAMLISTS + VALMEM + EXTKW + FUNEXP + CONTROL
-(jednořádková těla if, if-výraz, for-cyklus se strážemi).
+Základní zadání se sedmi rozšířeními: BOOLTHEN, PARAMLISTS, VALMEM, EXTKW,
+FUNEXP, CONTROL, INTERPOLATEDS. Všechna jsou zapracovaná, ověřená
+a zdokumentovaná v sekcích 13 až 17.
 
-Otázky, které tato verze řešila, a jejich rozhodnutí (zdůvodnění v §11 a §13):
+| rozšíření | co přidává | kde |
+|---|---|---|
+| BOOLTHEN | Boolean typ, literály, `!`, `&&`, `\|\|`, volitelné `else`, `else if` | §13 |
+| PARAMLISTS | 0..n skupin parametrů, `def f = 42` | §14 |
+| VALMEM | `.člen` postfix na hodnotách | §14 |
+| EXTKW | `extension` bloky s metodami | §14 |
+| FUNEXP | volání jako součást výrazu, výrazy jako argumenty | §15 |
+| CONTROL | jednořádková těla if, if-výraz, for s generátory a strážemi | §16 |
+| INTERPOLATEDS | interpolované řetězce `s"..."` a `s"""..."""` | §17 |
 
-| otázka | rozhodnutí |
-|---|---|
-| `if` bez `else`, `else if`, Boolean literály a `!` | BOOLTHEN (§13) |
-| 0..n skupin parametrů, `def f = 42`; `.člen` postfix; `extension` bloky | PARAMLISTS + VALMEM + EXTKW (§14) |
-| volání ve výrazu, výrazy jako argumenty | FUNEXP (§15) |
-| jednořádková těla if, `if` jako výraz, `for` s generátory a strážemi | CONTROL (§16) |
-
-Verifikace: `ll_check.py`, 179 tokenových streamů. Ověřuje bezkoliznost
-LL tabulky (FIRST/FOLLOW, SELECT, 0 kolizí) a přijetí nebo odmítnutí vstupů
-tabulkovým parserem (179/179, §9). Rozsah záruky: bezkoliznost platí pro
-modelované rozhraní (pseudoterminály mají FIRST ručně, výrazová analýza je
-aproximována automatem operandů a operátorů). Skript neověřuje sémantiku ani
-úplnost IFJ26; výrazy v celé šíři řeší precedenční tabulka.
+Verifikace: `ll_check.py` kontroluje LL bezkoliznost a tabulkovým
+parserem prochází 228 tokenových streamů
+(228/228, §9). Výrazy řeší precedenční tabulka, skript ověřuje jen
+strukturu příkazů.
 
 ## 0. Konvence
 
@@ -31,7 +31,7 @@ aproximována automatem operandů a operátorů). Skript neověřuje sémantiku 
   Pozor: `INT_TOKEN` = typ, `INT_NUM` = literál, dva různé tokeny.
   Před přepisem do C mechanicky srovnat přesné identifikátory z `token.h`
   (např. `INT_NUM_TOKEN`, `STRING_LITERAL_TOKEN`).
-- Neterminály CamelCase; v C funkce `parse_xxx()` ve snake_case.
+- Neterminály CamelCase; v C funkce `parse_xxx` ve snake_case.
   Ocasy seznamů mají suffix `Rest` (`ParamRest`, `StmtRest`), celé seznamy
   plurál nebo `List` (`FuncDefs`, `ParamList`).
 - `ε` = pravá strana prázdná. Komentáře `(* … *)`.
@@ -46,7 +46,7 @@ Program  → Prolog FuncDefs EOF
 Prolog   → IMPORT ID DOT MUL EOL          (* v kódu: attr(ID)=="ifj26", jinak chyba 2 *)
 FuncDefs → EOL FuncDefs                   (* prázdné řádky po importu / mezi definicemi *)
          | FuncDef FuncDefs
-         | ExtensionDef FuncDefs           (* v9 EXTKW *)
+         | ExtensionDef FuncDefs           (*  EXTKW *)
          | ε                              (* Predikt: {EOL} | {DEF, AT} | {EXTENSION} | {EOF} *)
 FuncDef  → DEF ID Params RetType ASSIGN Body
          | AT ID OptEol DEF ID Params RetType ASSIGN Body
@@ -55,7 +55,7 @@ OptEol   → EOL
          | ε                             (* Predikt: {EOL} | FOLLOW = {DEF} *)
 
 ExtensionDef → EXTENSION LPAREN Param RPAREN EOL INDENT ExtDefs DEDENT
-ExtDefs      → EOL ExtDefs              (* v9 EXTKW: metody rozšíření; tvar = §5.9 PDF *)
+ExtDefs      → EOL ExtDefs              (*  EXTKW: metody rozšíření; tvar = §5.9 PDF *)
              | FuncDef ExtDefs          (* @main uvnitř = sémantika, ne tvar *)
              | ε                         (* Predikt: {EOL, AT, DEF} | FOLLOW = {DEDENT} *)
 ```
@@ -63,23 +63,20 @@ ExtDefs      → EOL ExtDefs              (* v9 EXTKW: metody rozšíření; tva
 Řešení:
 
 - Na vrchní úrovni jsou jen definice funkcí. Příkaz po definicích skončí
-  na prázdné buňce `FuncDefs × VAL`, chybou 2.
-- Prázdné řádky konzumuje seznam (`FuncDefs → EOL FuncDefs`), ne okolí.
-  Specifikace §1.2 prázdné řádky ignoruje, takže mají jediné místo,
-  řeší jediné pravidlo. Stejný vzor jako `StmtRest` v §3.
+  chybou 2 (prázdná buňka `FuncDefs × VAL`).
+- Prázdné řádky konzumuje seznam (`FuncDefs → EOL FuncDefs`). Podle
+  specifikace §1.2 se ignorují, takže je řeší jediné pravidlo.
+  Stejný vzor jako `StmtRest` v §3.
 - `OptEol`: anotace @main může být na samostatném řádku i na stejném
-  řádku s `def`. Specifikace §2: „Anotace může být na samostatném řádku
-  nebo na stejném řádku s klíčovým slovem def.“ Znak @ se v jiném
-  kontextu nepoužívá, mezi ním a `main` nesmí být žádný znak.
-- Kontrola `ifj26` a `main` je kontrola atributu tokenu v kódu
-  pomocí `strcmp` na atributu
-tokenu. Gramatika neumí
-  vyjádřit „identifikátor s konkrétní hodnotou“.
+  řádku s `def` (specifikace §2). Znak @ se v jiném kontextu
+  nepoužívá, mezi ním a `main` nesmí být žádný znak.
+- Kontrola `ifj26` a `main` probíhá v kódu pomocí `strcmp` na atributu
+  tokenu. Gramatika neumí vyjádřit identifikátor s konkrétní hodnotou.
 
 ## 2. Hlavička funkce
 
 ```ebnf
-Params          → ParamGroup Params           (* v9: 0..n skupin; def answer = 42 má nula *)
+Params          → ParamGroup Params           (* : 0..n skupin; def answer = 42 má nula *)
                 | ε                            (* Predikt: {LPAREN} | FOLLOW = {COLON, ASSIGN} *)
 ParamGroup      → LPAREN ParamList RPAREN
 ParamList       → Param ParamRest
@@ -92,26 +89,25 @@ Param           → ID COLON Type
 RetType         → COLON Type                    (* {COLON} *)
                 | ε                              (* FOLLOW = {ASSIGN} *)
 Type            → INT_TOKEN | DOUBLE_TOKEN | STRING_TOKEN | UNIT_TOKEN
-                | BOOLEAN_TOKEN                 (* v8 BOOLTHEN *)
+                | BOOLEAN_TOKEN                 (*  BOOLTHEN *)
 Body            → Rhs EOL                       (* jednořádkové tělo *)
                 | EOL INDENT Block DEDENT        (* blokové tělo *)
 ```
 
 Řešení:
 
-- Levá faktorizace: po `ParamRest`. Po `COMMA` rozhoduje
-  `AfterCommaParam` jedním lookaheadem: `ID` znamená další parametr,
-  `RPAREN` znamená konec seznamu. Dvě pravidla začínající stejným
-  tokenem by v LL kolidovala.
+- Levá faktorizace: po `COMMA` rozhoduje `AfterCommaParam` jedním
+  lookaheadem (`ID` = další parametr, `RPAREN` = konec seznamu).
+  Dvě pravidla začínající stejným tokenem by kolidovala.
 - Koncová čárka (§1.2): „Za poslední položkou neprázdného seznamu
   parametrů … je povolena koncová čárka, pouze pokud je následujícím
   tokenem uzavírací závorka a mezi čárkou a touto závorkou je znak
-  konce řádku.“ Řeší ji větev `AfterCommaParam → ε`: `RPAREN`
-  konzumuje až nadřazené `Params` (parser v ε-větvi ověří flag ze scanneru (konec řádku před touto
-  `)`). Bez flagu jde o chybu 2.
+  konce řádku.“ Řeší ji větev `AfterCommaParam → ε`: `RPAREN` konzumuje až
+  nadřazené `Params`, parser v ε-větvi ověří flag ze scanneru
+  (konec řádku před touto `)`). Bez flagu jde o chybu 2.
 - Návratový typ je syntakticky nepovinný (`RetType → ε`, FOLLOW
-  = `{ASSIGN}`). Povinnost při rekurzi nebo výskytu `return`
-  je sémantická kontrola (typová chyba 6), ne tvar.
+  = `{ASSIGN}`). Povinnost při rekurzi nebo výskytu `return` je
+  sémantická kontrola (typová chyba 6).
 - Tělo má dvě formy (§2.3). Rozlišuje je jeden lookahead: začátek
   výrazu nebo `EOL`.
 
@@ -134,7 +130,7 @@ StmtRest   → EOL StmtRest                    (* prázdné řádky *)
            | ε                                 (* FOLLOW = {DEDENT} *)
 LineEnd    → EOL                             (* konec logického řádku *)
            | SEMICOLON MidItem               (* pokračování téhož řádku *)
-MidItem    → MidSimple LineEnd               (* v9 *)
+MidItem    → MidSimple LineEnd               (*  *)
            | IfStmt
            | WhileStmt
            | EOL                              (* trailing ; - řádek končí *)
@@ -144,21 +140,20 @@ MidSimple  → ValStmt | VarStmt | ReturnStmt | ID StmtIdTail
 
 `MidSimple` je `SimpleStmt` s unárními operátory: §1.2 zakazuje operátor
 pouze na začátku logického řádku - za středníkem na stejném řádku
-je `print(1); !true` legální (v9, externí review). Trailing `;`
+je `print(1); !true` legální (externí review). Trailing `;`
 (`val a = 1;` EOL) řeší `MidItem → EOL`, nikoli ε - ε by kontaminovalo
 FOLLOW stmt-starty a kolidovalo s `MidSimple` (ověřeno dvěma spadlými
 pokusy).
 
 Řešení:
 
-- Ukončovatel patří příkazu. Kdyby EOL konzumovalo okolí, bylo by přijato
-  `val a = 1 val b = 2` bez oddělovače. S povinným `LineEnd`
-  skončí chybou 2 (prázdná buňka `LineEnd × VAL`, chybou 2.
-- Volné řádky konzumuje seznam. Za `;` může přijít EOL
-  a před DEDENT mohou být prázdné řádky. `StmtRest → EOL StmtRest`
-  konzumuje EOLy po jednom a vždy znovu rozhoduje. 
-- Blok je neprázdný (§2.1: „Blok musí mít vždy tělo“); prázdné
-  tělo se píše literálem `()`.
+- Ukončovatel patří příkazu. Kdyby EOL konzumovalo okolí, bylo by
+  přijato `val a = 1 val b = 2` bez oddělovače. S povinným `LineEnd`
+  skončí chybou 2 (prázdná buňka `LineEnd × VAL`).
+- Volné řádky konzumuje seznam. Za `;` může přijít EOL a před
+  DEDENT mohou být prázdné řádky. Pravidlo `StmtRest → EOL StmtRest`
+  konzumuje EOLy po jednom a vždy znovu rozhoduje.
+- Blok je neprázdný (§2.1). Prázdné tělo se zapisuje literálem `()`.
 - Víceřádkové příkazy nemají za sebou ukončovatel: EOL patří
   poslednímu příkazu uvnitř bloku, DEDENT zavírá konstrukci.
 
@@ -181,15 +176,15 @@ SimpleStmt → ValStmt | VarStmt | ReturnStmt
            | ID StmtIdTail                   (* přiřazení / volání / výraz od id *)
            | ExprStmt                        (* výrazový příkaz - bez unárních
                                               operátorů, §1.2: logický řádek
-                                              nezačíná operátorem (v8.1) *)
-ForStmt   → FOR ForHead                      (* v11 CONTROL *)
+                                              nezačíná operátorem (.1) *)
+ForStmt   → FOR ForHead                      (* CONTROL *)
 ValStmt    → VAL ID ValVarTail
 VarStmt    → VAR ID ValVarTail
 ValVarTail → COLON Type ASSIGN Rhs            (* s typem, jeden logický řádek *)
            | ASSIGN Rhs                       (* bez typu *)
 IfStmt     → IF Expr THEN IfThen
-IfThen     → EOL INDENT Block DEDENT IfTail   (* v11: then = blok *)
-           | Rhs IfElseOpt                    (* v11: then = jednořádek *)
+IfThen     → EOL INDENT Block DEDENT IfTail   (* : then = blok *)
+           | Rhs IfElseOpt                    (* : then = jednořádek *)
 IfTail     → ELSE IfElse                      (* po blokové větvi *)
            | ε
 IfElseOpt  → ELSE IfElse                      (* po jednořádkové větvi *)
@@ -205,14 +200,14 @@ RhsOpt     → Rhs
 
 Řešení:
 
-- Kolize `id` na úrovni příkazu je čistě syntaktická. Příkaz
-  začínající identifikátorem rozhoduje jeden lookahead za `id`: `=` znamená přiřazení,
-  `(` volání, ostatní tokeny znamenají výraz. Tabulka symbolů v této vrstvě
-  není potřeba.
-- `val` a `var` sdílejí `ValVarTail`. (liší se prvním tokenem) Inicializace je vždy povinná (§2.2); `var x: Int` bez `=`
-  skončí chybou 2 (prázdná buňka `ASSIGN × EOL`, chybou 2.
+- Kolize `id` na úrovni příkazu je čistě syntaktická. Za `id`
+  rozhoduje jeden lookahead: `=` znamená přiřazení, `(` volání,
+  ostatní tokeny výraz. Tabulka symbolů v této vrstvě není potřeba.
+- `val` a `var` sdílejí `ValVarTail` (liší se prvním tokenem).
+  Inicializace je vždy povinná (§2.2): `var x: Int` bez `=` skončí
+  chybou 2 (prázdná buňka `ASSIGN × EOL`).
 - `if` a `while`: po hlavičce následuje EOL a odsazený blok (§1.2).
-  `else` je od v8 volitelný (BOOLTHEN, §13.3) a `else if` je rekurzivní
+  `else` je volitelný (BOOLTHEN, §13.3), `else if` je rekurzivní
   `IfStmt` (§13.4). Za `DEDENT` větve then následuje `ELSE` přímo.
 - `return` přebírá výraz nebo volání (`RhsOpt`), viz §4.2.
 
@@ -258,19 +253,19 @@ return výraz-nebo-volání“).
 ## 5. Výraz: Rhs jako alias, dispatch na úrovni příkazu
 
 ```ebnf
-Rhs        → Expr                           (* v10 FUNEXP: alias - volání je
+Rhs        → Expr                           (* FUNEXP: alias - volání je
                                               postfix výrazu, styčný bod jako Expr *)
 StmtIdTail → ASSIGN Rhs                      (* přiřazení, jen na úrovni příkazu *)
            | ExprFromId                      (* výrazový příkaz od uloženého ID;
-                                              LPAREN = volání f(1) (v10) *)
+                                              LPAREN = volání f(1)  *)
 
 Expr       → (* výraz od aktuálního tokenu *)
 ExprNoId   → (* totéž; volající zaručuje, že začátek není ID *)
 ExprFromId → (* výraz od už přečteného tokenu ID - je to operand *)
 ```
 
-`Rhs` je od v10 pseudoterminál (alias pro `Expr`, FIRST beze změny) -
-`IdTail`, `ArgGroups` a `Term` z v9 mizí: volání je postfix
+`Rhs` je od  pseudoterminál (alias pro `Expr`, FIRST beze změny) -
+`IdTail`, `ArgGroups` a `Term` z  mizí: volání je postfix
 na libovolném operandu a patří výrazové analýze (§15).
 `Expr`, `ExprNoId`, `ExprFromId`, `Rhs` nemají pravidla; jsou to styčné body
 s precedenční analýzou. Výrazy jsou v LL gramatice záměrně
@@ -285,7 +280,7 @@ Dispatch za úvodním `ID` v pozici `Rhs` nebo `StmtIdTail` dělá parser
 podle symtable, ne čistě syntakticky. Učitel předepsal chybové kódy
 (Moodle poznámka „Poznámky k tvorbě LL gramatiky“: „za proměnnou
 nesmí být závorka“ znamená chybu 2). Gramatika a LL tabulka se
-nemění, mění se jen akce v `parse_rhs()` a `parse_stmt_id_tail()`
+nemění, mění se jen akce v `parse_rhs` a `parse_stmt_id_tail`
 (volba větve podle symtable a lookaheadu, stejná technika jako
 `strcmp` u `ifj26` a `main`).
 
@@ -313,7 +308,7 @@ symbolu. Neznámý symbol po předprůchodu je chyba 3.
 ## 6. Argumenty volání
 
 ```ebnf
-ArgList       → Expr ArgRest                 (* v10 FUNEXP: argumenty = výrazy *)
+ArgList       → Expr ArgRest                 (* FUNEXP: argumenty = výrazy *)
               | ε                            (* FIRST(Expr) | {RPAREN} *)
 ArgRest       → COMMA AfterCommaArg
               | ε
@@ -321,16 +316,16 @@ AfterCommaArg → Expr ArgRest
               | ε                            (* koncová čárka: jen s EOL-flagem *)
 ```
 
-Poznámka (v10): tato pravidla nejsou v LL tabulce - seznam argumentů
+Poznámka : tato pravidla nejsou v LL tabulce - seznam argumentů
 zpracovává výrazová analýza jako součást výrazu (sdílený `parse_arg_list`
 pro volání i metody; koncová čárka jen s EOL-flagem na závěrečné `)` -
 vnořené závorky seskupení a volání patří dovnitř výrazu, seznam se zastaví
 před čárkou a svou uzavírací `)`). §6 je tedy popis jazyka seznamu pro
 výrazovou část, ne pravidla LL sestupu - ta by byla od Program odpojená
-(prázdné FOLLOW). `Term` z v9 mizí - `()` je součástí obecného výrazu.
-Původní řešení (termy) platila do v9; FUNEXP ji nahrazuje.
-- `()` je literál Unit (§1.1: „Literál hodnoty typu Unit se zapisuje
-  ()“), proto je legální například `print(())`.
+(prázdné FOLLOW). `Term` z  mizí - `` je součástí obecného výrazu.
+Původní řešení (pouze termy) platilo do FUNEXP, který ho nahradil.
+- `` je literál Unit (§1.1: „Literál hodnoty typu Unit se zapisuje
+  “), proto je legální například `print()`.
 - Koncová čárka: tentýž vzor jako u parametrů v §2, včetně kontroly
   EOL-flagu v ε-větvi `AfterCommaArg`.
 
@@ -365,6 +360,8 @@ Původní řešení (termy) platila do v9; FUNEXP ji nahrazuje.
 | Range | FIRST(Expr) | `EOL DO` | ne |
 | RangeDir | `TO UNTIL` | FIRST(Expr) | ne |
 | RangeBy | `BY` | `EOL DO` | ano |
+| InterpString | `INTERP_START` | (satelit) | ne |
+| InterpContent | `ID INTERP_MID INTERP_END LBRACE` | (satelit) | ne |
 | Body | `EOL ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN PLUS MINUS TRUE FALSE NOT` | `AT DEF EOL EOF` | ne |
 | Block | `VAL VAR IF WHILE RETURN ID INT_NUM DOUBLE_NUM STRING_LITERAL LPAREN TRUE FALSE` | `DEDENT` | ne |
 | LineEnd | `EOL SEMICOLON` | stmt-starty, `DEDENT EOL` | ne |
@@ -404,10 +401,10 @@ Legální vstupy (výběr, 65/65 celkem): případy A až G; vnořené bloky;
 prázdné řádky v bloku i před DEDENT; `;` s následujícím EOL; koncová
 čárka s EOL-flagem (parametry i argumenty); všechny tvary val/var;
 přiřazení, přiřazení voláním, volací příkaz, více argumentů; výrazový
-příkaz od id i od literálu; unární minus; `()` jako příkaz i tělo;
+příkaz od id i od literálu; unární minus; `` jako příkaz i tělo;
 podmínka v závorkách; while; return s výrazem, voláním i holý;
 jednořádkové tělo voláním; @main s blokem i na samostatném řádku;
-`print(())`; prázdné řádky mezi definicemi i po importu; jen import
+`print()`; prázdné řádky mezi definicemi i po importu; jen import
 bez definic; faktoriál; celý program (add + @main).
 
 Nelegální vstupy, všechny končí chybou 2:
@@ -453,7 +450,7 @@ Nelegální vstupy, všechny končí chybou 2:
 ## 11. Rozhodnuté otázky a jejich zdůvodnění
 
 1. Holý `return`: připouštíme (`RhsOpt → ε`). Specifikace §2.3:
-   „Samostatný return vrací () a je povolen pouze ve funkci
+   „Samostatný return vrací  a je povolen pouze ve funkci
    s explicitním návratovým typem Unit.“ Syntakticky legální;
    navazující sémantická kontrola: jen explicitní Unit, porušení
    znamená typovou chybu 6. Doplňkové pravidlo tamtéž: funkce
@@ -489,36 +486,36 @@ Nelegální vstupy, všechny končí chybou 2:
 
 | neterminál | funkce | poznámky ke kódu |
 |---|---|---|
-| Program | `parse_program()` | |
-| Prolog | `parse_prolog()` | po matchi ID: `strcmp(attr,"ifj26")`, jinak chyba 2 |
-| FuncDefs | `parse_func_defs()` | smyčka: EOL / DEF / AT / EXTENSION / EOF |
-| ExtensionDef / ExtDefs | `parse_extension_def()` / `parse_ext_defs()` | v9 EXTKW |
-| FuncDef | `parse_func_def()` | větev AT: `strcmp(attr,"main")` |
-| OptEol | inline | `if (cur==EOL) advance();` |
-| Params / ParamList / ParamRest / AfterCommaParam | `parse_params()` a další | ε-větev AfterCommaParam: check EOL-flagu |
-| Param | `parse_param()` | |
-| RetType | `parse_ret_type()` | |
-| Type | `parse_type()` | switch přes 4 tokeny |
-| Body | `parse_body()` | |
-| Block | `parse_block()` | |
-| BlockItem | `parse_block_item()` | kategorie: jednoduchý → SimpleStmt + LineEnd; složený → If/While |
-| StmtRest | `parse_stmt_rest()` | smyčka: EOL / další / konec |
-| LineEnd / MidItem / MidSimple | `parse_line_end()` / `parse_mid_item()` / `parse_mid_simple()` | v9: za ; unární OK, trailing ; přes MidItem→EOL |
-| SimpleStmt | `parse_simple_stmt()` | switch přes první token |
-| ValStmt / VarStmt | `parse_val_stmt()` / `parse_var_stmt()` | společný `parse_val_var_tail()` |
-| ValVarTail | `parse_val_var_tail()` | jednořádkové (§4.1) |
-| IfStmt / WhileStmt | `parse_if_stmt()` / `parse_while_stmt()` | |
-| IfThen / IfElseOpt / IfElse | `parse_if_then()` / `parse_if_else()` | v11: jednořádek/blok/else-if řetěz |
-| ForStmt / ForHead / Range | `parse_for_stmt()` / `parse_for_head()` / `parse_range()` | v11: to/until/by = ID+strcmp |
-| DoBody / ForGuardRest | `parse_do_body()` / `parse_guards()` | |
-| ReturnStmt | `parse_return_stmt()` | ε-větev `RhsOpt` = holý return |
+| Program | `parse_program` | |
+| Prolog | `parse_prolog` | po matchi ID: `strcmp(attr,"ifj26")`, jinak chyba 2 |
+| FuncDefs | `parse_func_defs` | smyčka: EOL / DEF / AT / EXTENSION / EOF |
+| ExtensionDef / ExtDefs | `parse_extension_def` / `parse_ext_defs` |  EXTKW |
+| FuncDef | `parse_func_def` | větev AT: `strcmp(attr,"main")` |
+| OptEol | inline | `if (cur==EOL) advance;` |
+| Params / ParamList / ParamRest / AfterCommaParam | `parse_params` a další | ε-větev AfterCommaParam: check EOL-flagu |
+| Param | `parse_param` | |
+| RetType | `parse_ret_type` | |
+| Type | `parse_type` | switch přes 4 tokeny |
+| Body | `parse_body` | |
+| Block | `parse_block` | |
+| BlockItem | `parse_block_item` | kategorie: jednoduchý → SimpleStmt + LineEnd; složený → If/While |
+| StmtRest | `parse_stmt_rest` | smyčka: EOL / další / konec |
+| LineEnd / MidItem / MidSimple | `parse_line_end` / `parse_mid_item` / `parse_mid_simple` | : za ; unární OK, trailing ; přes MidItem→EOL |
+| SimpleStmt | `parse_simple_stmt` | switch přes první token |
+| ValStmt / VarStmt | `parse_val_stmt` / `parse_var_stmt` | společný `parse_val_var_tail` |
+| ValVarTail | `parse_val_var_tail` | jednořádkové (§4.1) |
+| IfStmt / WhileStmt | `parse_if_stmt` / `parse_while_stmt` | |
+| IfThen / IfElseOpt / IfElse | `parse_if_then` / `parse_if_else` | : jednořádek/blok/else-if řetěz |
+| ForStmt / ForHead / Range | `parse_for_stmt` / `parse_for_head` / `parse_range` | : to/until/by = ID+strcmp |
+| DoBody / ForGuardRest | `parse_do_body` / `parse_guards` | |
+| ReturnStmt | `parse_return_stmt` | ε-větev `RhsOpt` = holý return |
 | RhsOpt | inline | |
-| Rhs | `parse_rhs()` | v10: volání výrazové analýzy (alias Expr); symtable dispatch uvnitř ní |
-| StmtIdTail | `parse_stmt_id_tail()` | ASSIGN → parse_rhs(); jinak dispatch (§5.1) |
-| StmtIdTail | `parse_stmt_id_tail()` | ASSIGN → parse_rhs(); jinak `parse_expression_from(saved)` (LPAREN = volání, v10) |
-| ArgList / ArgRest / AfterCommaArg | `parse_args()` a další | flag u AfterCommaArg |
-| Term | `parse_term()` | včetně `()` |
-| Expr / ExprNoId / ExprFromId | precedenční analýza | `parse_expression()`, `parse_expression_from(tok)`; stopping: EOL, SEMICOLON, THEN, DO, **COMMA, RPAREN** (čárka a uzavírací závorka seznamu argumentů - seskupovací a vnořené závorky patří dovnitř výrazu, §6) |
+| Rhs | `parse_rhs` | : volání výrazové analýzy (alias Expr); symtable dispatch uvnitř ní |
+| StmtIdTail | `parse_stmt_id_tail` | ASSIGN → parse_rhs; jinak dispatch (§5.1) |
+| StmtIdTail | `parse_stmt_id_tail` | ASSIGN → parse_rhs; jinak `parse_expression_from(saved)` (LPAREN = volání,) |
+| ArgList / ArgRest / AfterCommaArg | `parse_args` a další | flag u AfterCommaArg |
+| Term | `parse_term` | včetně `` |
+| Expr / ExprNoId / ExprFromId | precedenční analýza | `parse_expression`, `parse_expression_from(tok)`; stopping: EOL, SEMICOLON, THEN, DO, **COMMA, RPAREN** (čárka a uzavírací závorka seznamu argumentů - seskupovací a vnořené závorky patří dovnitř výrazu, §6) |
 
 ## 13. Rozšíření BOOLTHEN
 
@@ -607,7 +604,7 @@ s implementovaným BOOLTHEN odmítat `if` bez `else` v programech, které
 jinak rozšíření nepoužívají? Obdobně se bude řešit každé další rozšíření
 měnící povinné části základu.
 
-### 13.8 Opravy v8.1 (po externím review)
+### 13.8 Opravy .1 (po externím review)
 
 Tři chyby nalezené review, ověřené na kontrolním parseru a opravené:
 
@@ -625,7 +622,7 @@ Tři chyby nalezené review, ověřené na kontrolním parseru a opravené:
    `SimpleStmt → ExprStmt` s `FIRST(ExprStmt)` bez `+`, `-` a `!`
    (mezera u `+`/`-` existovala už od základní verze; `!` ji rozšířil
    BOOLTHEN). Pozice uprostřed řádku jsou beze změny: `val x = !true`,
-   `if !x then`, `def f(): Boolean = !value` zůstávají legální
+   `if !x then`, `def f: Boolean = !value` zůstávají legální
    (výraz za `=`, `then`, v těle na stejném logickém řádku).
 3. Relační řetězy se počítají po `&&`/`||`. Model výrazu odmítal
    legální `1 < 2 && 3 < 4`, protože počítal všechna porovnání na úrovni
@@ -671,7 +668,7 @@ není v žádném existujícím FIRST/FOLLOW, jako dříve `BOOLEAN_TOKEN` u BOO
 Tvar bloku odpovídá ukázce §5.9: hlavička s jedním explicitně typovaným
 parametrem-příjemcem, EOL, odsazené metody (`ExtDefs`, tentýž vzor
 seznamu jako `FuncDefs`). Bezparametrické metody bez závorek
-(`def twice: Int`) a metody s prázdným seznamem (`def foo(): String`)
+(`def twice: Int`) a metody s prázdným seznamem (`def foo: String`)
 jsou 0- a 1-skupinové funkce z §14.1. `@main` uvnitř extension je věc
 sémantiky. Argumenty metody za `.člen` (`x.plus(2)`, `x.plus(1)(2)`)
 zpracovává výrazová analýza - sdílený `parse_arg_list` s IdTail-větví
@@ -704,8 +701,8 @@ výrazy a tabulka se smrskne.
 ### 14.5 Rozšíření dispatch tabulky (symtable)
 
 Symtable u funkce zná počet skupin (0, 1, 2+). Odpovědi z PDF:
-`answer()` = chybný počet seznamů → chyba 5 (§5.10); `val x = f`
-(f má `()`) → chyba 2 (funkce není hodnota; přiřazení funkce
+`answer` = chybný počet seznamů → chyba 5 (§5.10); `val x = f`
+(f má ``) → chyba 2 (funkce není hodnota; přiřazení funkce
  až s LAMBDAS, a to jen s explicitním typem); 0-skupinová funkce
 v podmínce → legální (§5.10: „součástí výrazu i bez FUNEXP“);
 `@main` s nula skupinami → legální (0 skupin = bez parametrů).
@@ -714,7 +711,7 @@ v podmínce → legální (§5.10: „součástí výrazu i bez FUNEXP“);
 (VALMEM „tento zápis tvoří výraz“) - k legalitě bez FUNEXP se
 v testech dávky 5 přikláníme k legálnímu, sondu má potvrdit.
 
-### 14.6 Opravy v9 (po externím review)
+### 14.6 Opravy  (po externím review)
 
 Čtyři nálezy review, ověřené na kontrolním parseru a opravené:
 
@@ -725,13 +722,13 @@ v testech dávky 5 přikláníme k legálnímu, sondu má potvrdit.
    je bez nich. Trailing `;` řeší `MidItem → EOL` (ne ε - viz §3).
    Regresní testy: `print(1); !true` OK, `val x = 1; -x` OK, `!true` na
    vlastním řádku stále chyba 2.
-2. Literál `()` v argumentech metody. `_args()` (model výrazové analýzy
-   v ll_check) znal jen jednotokenové termy; `1.take(())` odmítal. Nyní
-   `()` jako term všude (shoda s `Term` v §6). Chyba modelu, ne gramatiky -
+2. Literál `` v argumentech metody. `_args` (model výrazové analýzy
+   v ll_check) znal jen jednotokenové termy; `1.take()` odmítal. Nyní
+   `` jako term všude (shoda s `Term` v §6). Chyba modelu, ne gramatiky -
    plán sdílet `parse_arg_list` mezi IdTail-větví a metodami zůstává.
-3. Argumenty přes uzavřenou závorku. `("x".length)()` procházel, protože
+3. Argumenty přes uzavřenou závorku. `("x".length)` procházel, protože
    `after_member` přežil zavření závorky. Po uzavření závorky se resetuje -
-   `()` za uzavřeným výrazem je volání na výrazu = FUNEXP, chyba 2.
+   `` za uzavřeným výrazem je volání na výrazu = FUNEXP, chyba 2.
    Řetěz skupin u metody (`1.m(2)(3)`) funguje dál.
 4. Soulad dokumentace. §5.1 dispatch: funkce s 0 skupinami se bez závorek
    VOLAJÍ (§5.10, §14.5) - řádek „funkce + jiný → chyba 2" platí jen pro
@@ -748,7 +745,7 @@ aliasem pro `Expr`, argumenty jsou výrazy.
 
 ### 15.1 Co se změnilo
 
-| oblast | v9 | v10 |
+| oblast |  |  |
 |---|---|---|
 | volání | `IdTail → LPAREN ArgList RPAREN ArgGroups` | postfix výrazu - věc výrazové analýzy |
 | `Rhs` | `ID IdTail \| ExprNoId` | pseudoterminál - alias pro `Expr` |
@@ -767,11 +764,11 @@ až po vyhodnocení obou skupin) - ne dvě volání.
 Přiřazení není výraz: `x = y = 1` zůstává chyba 2 - proto `StmtIdTail`
 přežívá jako jediná dispatch vrstva na úrovni příkazu. `x(1) = 2` umírá
 na `LineEnd × ASSIGN`. Podmínka if/while je výraz → `if f(1) then`
-je od v10 syntakticky legální (sémantika: návratový typ Boolean).
+je od  syntakticky legální (sémantika: návratový typ Boolean).
 
 ### 15.2 after_operand (kontrakt s výrazovou analýzou)
 
-Příznak `after_member` (v9) se mění na `after_operand` - LPAREN
+Příznak `after_member`  se mění na `after_operand` - LPAREN
 v operátor-stavu po libovolném operandu = volání. Přechody:
 
 | událost | after_operand |
@@ -779,14 +776,14 @@ v operátor-stavu po libovolném operandu = volání. Přechody:
 | start `ExprFromId` (uložené ID je operand) | True |
 | operand (id, literál, TRUE/FALSE) | True |
 | unární `+ - !` (čeká se operand) | nemění (False) |
-| `()` - prázdná závorka | True |
-| `)` - zavření neprázdné závorky | True (v9.1 reset; v10 přetočeno - zavřený výraz je operand) |
+| `` - prázdná závorka | True |
+| `)` - zavření neprázdné závorky | True (.1 reset;  přetočeno - zavřený výraz je operand) |
 | binární operátor | False |
 | `.člen` | True |
-| argumentová skupina `_args()` | True (zůstává - řetězy `f(1)(2)`) |
+| argumentová skupina `_args` | True (zůstává - řetězy `f(1)(2)`) |
 
 `1(2)` - volání na literálu - je syntakticky legální; sémantika odmítne
-(kód k dořešení: 5 × 6, sémantická past). `f()` na 0-skupinové funkci →
+(kód k dořešení: 5 × 6, sémantická past). `f` na 0-skupinové funkci →
 chyba 5 (špatný počet seznamů, §5.10). Řetězy `f(1)(2)(3)`
 a mixy `f(1).g(2).h(3)` fungují přes after_operand bez omezení délky.
 
@@ -798,7 +795,7 @@ eta-expanze až LAMBDAS); `f` 0-skupinová = volání bez závorek (§14.5).
 
 ### 15.4 Výhled (LAMBDAS)
 
-Výrazy jsou od v10 celé u výrazové analýzy - operátory, priority,
+Výrazy jsou od  celé u výrazové analýzy - operátory, priority,
 závorky, volání, postfix. To je předpoklad LAMBDAS:
 rozlišení `(x: Int) => …` od `(x + 1)` vyžaduje najít párovou `)`
 a zkusit `=>` - LL tabulka to neumí, recursive descent výrazové
@@ -815,7 +812,7 @@ těla všech větví; for s jedním generátorem (`to`/`until`/`by`) a strážem
 EOL-asymetrie (§4): bloková větev končí DEDENT (nic za ní - `IfTail → ε`),
 jednořádková EOL - terminátor patří větvi jako u `Body → Rhs EOL`.
 Proto dvě téměř shodná pravidla (`IfTail` ε × `IfElseOpt` EOL) - LL
-je amnestická, tentýž vzor jako `LineEnd`/`MidSimple` (v9.1). Důsledek:
+je amnestická, tentýž vzor jako `LineEnd`/`MidSimple` (.1). Důsledek:
 `if c then a; b` = chyba 2 (jednořáková větev je jeden výraz - konzistentní
 s těly funkcí). Visící `else` (`if c then x⏎else y`) = chyba 2 -
 if bez else je po EOL dokončen (konzistentní se Scalou).
@@ -832,19 +829,19 @@ větev = jednořádek (greedy) nebo break-form (`EOL INDENT výraz EOL
 DEDENT`, spec ukázky abs2/abs3 - obojí potvrzeno: break může být za THEN
 i za ELSE).
 
-### 16.3 BROKE - odchylka od LL (v11.1 opraveno po review)
+### 16.3 BROKE - odchylka od LL (opraveno po review)
 
 Break-form spolkne EOL své větve - a to je EOL, které by ukončovalo
 nadřazený příkaz. `val abs2 = if … then⏎ 0 - x⏎ else⏎ x` proto končí
 DEDENTem jako víceřádkový příkaz (jako if/while) - bez LineEnd. LL
 to předem rozhodnout nedokáže: **řešením je test na poslední token
-výrazu = DEDENT** (v11.1; původní booleovský příznak BROKE byl po review
+výrazu = DEDENT** (; původní booleovský příznak BROKE byl po review
 nahrazen - rozhoduje jak skončil CELÝ výraz, ne zda někde uvnitř byl
 break). Terminátor se vynechá jen když aktuální token není EOL
 (prázdný řádek se konzumuje normálně). Tabulka se nemění - odchylka
 třídy symtable dispatch (§5.1; fórum: odchylky povoleny, pokud popsané).
 
-Blokové větve = plný Block (v11.1): `break-form = EOL INDENT Block
+Blokové větve = plný Block : `break-form = EOL INDENT Block
 DEDENT` - blok obsahuje i příkazy (val, if, …), hodnotu větve určuje
 poslední příkaz (§2.3). Blok zpracovává syntaktická analýza
 (kontrakt: výrazová volá statement parser pro blokové větve if-výrazu).
@@ -864,18 +861,90 @@ Jeden generátor, žádné yield, for není výraz (vše chyba 2 - spec).
 `Range → Expr RangeTail`, `RangeTail → TO Expr RangeBy | UNTIL Expr`
 (v kódu ID + `strcmp`, technika `ifj26`/`main` - doporučení učitele
 z fora). By jen u `to` - §5.3 výslovně uvádí krok pouze u inkluzivního
-tvaru `from to to by step`; `until` bez `by` (v11.1 po review). Kompozice s výrazy je zdarma: `to`/`until`/`by` jsou
+tvaru `from to to by step`; `until` bez `by` (po review). Kompozice s výrazy je zdarma: `to`/`until`/`by` jsou
 neoperátory - výraz se na nich zastaví bez jediného nového stopping
 pravidla. PDF: „Všechny meze i krok jsou výrazy typu Int" - plné
-výrazy včetně `by -2` a `by f()` (FUNEXP). `by 0`: literál → překladová
+výrazy včetně `by -2` a `by f` (FUNEXP). `by 0`: literál → překladová
 kontrola → chyba 10 (§6); výraz → generovat runtime kontrolu → 40.
 Řídicí proměnná = nová nemodifikovatelná Int platná v těle (zápis → 7).
 
 ### 16.6 Kontrakt s výrazovou analýzou (doplněk)
 
-| oblast | v10 | v11 |
+| oblast |  |  |
 |---|---|---|
-| primární výrazy | id, literály, `()`, volání | **+ IF** (if-výraz, rekurze) |
+| primární výrazy | id, literály, ``, volání | **+ IF** (if-výraz, rekurze) |
 | stopping tokeny | EOL, SEMI, THEN, DO, COMMA, RPAREN | + ELSE (automaticky - neoperátor) |
 | layout tokeny | nikdy uvnitř výrazu | jediná výjimka: break-form (jen hloubka 0) |
 | after_operand | po operandu/volání/.členu | + po if-výrazu |
+
+## 17. Rozšíření INTERPOLATEDS
+
+Specifikace §5.6: interpolátor `s` jen. `$id` pro hodnotu proměnné,
+`${výraz}` pro libovolný výraz. `$$` vloží dolar. Víceřádková varianta
+`s"""…"""` je podporovaná (dvojitá uvozovka v ní je doslova).
+
+```ebnf
+InterpString  → INTERP_START InterpContent
+InterpContent → LBRACE Expr RBRACE InterpContent
+              | ID InterpContent
+              | INTERP_MID InterpContent
+              | INTERP_END
+```
+
+Satelit výrazové analýzy. Z Program se k `InterpString` nedostanu
+derivací, tabulka má prázdné FOLLOW. Na rozdíl od `ArgList` 
+tu není žádná ε-větev, takže SELECT = FIRST a řádky jsou úplné.
+Volá ho greedy v operand-stavu přes `_run` — týž kontrakt jako
+`Block` u blokových větví if-výrazu (§16.3).
+
+`$var` interpoluje přesně jeden identifikátor (Scala sémantika).
+`s"$x.y"` interpoluje `x`, `.y` je text. `s"$x + 1"` interpoluje
+`x`, ` + 1` je text. Operátory a `.člen` fungují jen uvnitř `${…}`.
+ID v `$var` podléhá dispatchi §5.1: 0-skupinová funkce se volá,
+≥1 skupina → chyba 2, nedefinovaná → 3.
+
+### 17.1 Scanner (tokeny a atributy)
+
+| token | kdy | atribut |
+|---|---|---|
+| `INTERP_START` | text od `s"` po `$id`, `${` nebo `"` (`$$` je součást textu, ne hranice) | escap `\\` `\"` `\n` `\r` `\t`, `$$` → `$` |
+| `INTERP_MID` | neprázdný text mezi interpolacemi | totéž |
+| `INTERP_END` | poslední text před `"` nebo `"""` | totéž |
+| `LBRACE` | `${` | žádný |
+| `RBRACE` | párová `}` | žádný |
+
+Víceřádková varianta `s"""…"""`: LF v textu je povolen (je v atributu),
+`"` je doslova, uzavírá `"""`. U jednořádkové `s"…"` je LF chyba 1.
+
+### 17.2 Výrazová rovina
+
+`INTERP_START` vstupuje do FIRST(Expr/Rhs/ExprNoId/ExprNoIf/ExprStmt) —
+interpolovaný řetězec je operand jako volání, `.člen` a if-výraz.
+Konkrétně:
+
+- `val n = s"$x".length` — `.člen` funguje (after_operand po interp)
+- `s"a" + s"b"` — konkatenace
+- `f(s"$x" + s"$y")` — jako argument (i výrazový)
+- `s"a${if c then 1 else 2}b"` — if-výraz v `${…}`
+- `s"a${s"b$x"}c"` — vnořování (rekurze greedy)
+
+Stopping: `RBRACE` automaticky (neoperátor v operátor-stavu, jako
+dříve COMMA u argumentů). LF v `${…}` nenastane u jednořádkové
+(chyba 1 ze scanneru), u multiline je v atributu.
+
+### 17.3 Sémantika
+
+Každá vložená hodnota se převádí stejným způsobem jako `toStr`
+(specifikace výslovně). `s"$d"` pro `d = 1.5` dává `"1.50"`.
+Codegen: CONCAT sekvence (konstanta, toStr(x), konstanta, ...).
+
+### 17.4 Co odmítáme
+
+- `f"…"` a jiné interpolátory → ID + STRING_LITERAL → dva operandy
+  vedle sebe → chyba 2 (přirozeně, nic zvláštního)
+- `$` před číslicí / klíčovým slovem / samotné `$_` → lex chyba 1
+- prázdné `${}` → prázdná buňka LBRACE × RBRACE → chyba 2
+- interp jako typ → prázdná buňka Type × INTERP_START → chyba 2
+- holé `{` `}` v kódu → prázdné buňky → chyba 2
+- LF v jednořádkové `s"…"` (i uvnitř `${…}`) → lex chyba 1
+
