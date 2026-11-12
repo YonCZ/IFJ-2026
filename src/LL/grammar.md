@@ -421,12 +421,7 @@ Nelegální vstupy, všechny končí chybou 2:
 | `val x = (1 +)` | validace koncového stavu |
 | `if` s prázdnou podmínkou | validace koncového stavu |
 | `a < b < c` (řetězení relací) | validace koncového stavu |
-| `x = a + f(1)` | výrazová analýza se zastaví před `(`, `LineEnd × LPAREN` |
-| `x = f(1) + 2` | volání hotové, `LineEnd × PLUS` |
-| `return a + f(1)`, `return f(1) + 2` | též |
-| `if f(1) then …` | očekáváno THEN, přišel LPAREN |
-| `x = y = 1` | `IdTail × ASSIGN`, přiřazení není výraz |
-| `if …` bez else | očekáváno ELSE |
+| `x = y = 1` | `StmtIdTail × ASSIGN`, přiřazení není výraz |
 | chybějící INDENT po then | očekáváno INDENT |
 | příkaz na nejvyšší úrovni | `FuncDefs × VAL`, prázdná buňka |
 
@@ -495,7 +490,7 @@ Nelegální vstupy, všechny končí chybou 2:
 | Params / ParamList / ParamRest / AfterCommaParam | `parse_params` a další | ε-větev AfterCommaParam: check EOL-flagu |
 | Param | `parse_param` | |
 | RetType | `parse_ret_type` | |
-| Type | `parse_type` | switch přes 4 tokeny |
+| Type | `parse_type` | switch přes 5 tokenů |
 | Body | `parse_body` | |
 | Block | `parse_block` | |
 | BlockItem | `parse_block_item` | kategorie: jednoduchý → SimpleStmt + LineEnd; složený → If/While/For |
