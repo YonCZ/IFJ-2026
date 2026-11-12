@@ -1,6 +1,6 @@
-# LL tabulka (v12)
+# LL tabulka
 
-Ověřeno skriptem `ll_check.py` (0 kolizí). Kombinace neterminál × token, která v tabulce není, = prázdná buňka = syntaktická chyba 2.
+Ověřeno skriptem `ll_check.py` (236 testů, 0 kolizí). Kombinace neterminál × token, která v tabulce není, = prázdná buňka = syntaktická chyba 2.
 
 | Neterminál | Tokeny | Pravidlo |
 |---|---|---|

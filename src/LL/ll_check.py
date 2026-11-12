@@ -80,23 +80,24 @@ P = [
     ("SimpleStmt",    ("ExprStmt",)),   # .1: §1.2 - logický řádek nezačíná operátorem
     ("ValStmt",       ("VAL", "ID", "ValVarTail")),
     ("VarStmt",       ("VAR", "ID", "ValVarTail")),
-    # v4: Newlines smazán - typ a = na jednom logickém řádku (§1.2, grammar.md §4.1)
+    # Newlines smazán - typ a = na jednom logickém řádku (§1.2, grammar.md §4.1)
     ("ValVarTail",    ("COLON", "Type", "ASSIGN", "Rhs")),
     ("ValVarTail",    ("ASSIGN", "Rhs")),
     # CONTROL: jednořádková těla větví if (§5.3). EOL-asymetrie: bloková
-    # větev končí DEDENT (nic za ní → IfTail ε), jednořádková EOL (terminátor
+    # větev končí DEDENT (nic za ní → IfTail ε), jednořádková LineEnd (terminátor
     # patří větvi) → IfElseOpt→EOL. else if = řetěz (IfStmt); else-jednořádek
-    # nesmí být if-výraz (ExprNoIf) - jinak kolize s řetězem.
+    # nesmí být if-výraz (ExprNoIf).
     ("IfStmt",        ("IF", "Expr", "THEN", "IfThen")),
     ("IfThen",        ("EOL", "INDENT", "Block", "DEDENT", "IfTail")),
     ("IfThen",        ("Rhs", "IfElseOpt")),
     ("IfTail",        ("ELSE", "IfElse")),
     ("IfTail",        ()),
     ("IfElseOpt",     ("ELSE", "IfElse")),
-    ("IfElseOpt",     ("EOL",)),                        # bez else - BOOLTHEN 
+    ("IfElseOpt",     ("LineEnd",)),                    # bez else - BOOLTHEN
+
     ("IfElse",        ("EOL", "INDENT", "Block", "DEDENT")),
     ("IfElse",        ("IfStmt",)),                      # else if - řetěz 
-    ("IfElse",        ("ExprNoIf", "EOL")),
+    ("IfElse",        ("ExprNoIf", "LineEnd")),
     ("WhileStmt",     ("WHILE", "Expr", "DO", "EOL", "INDENT", "Block", "DEDENT")),
     # CONTROL: for s JEDNÍM generátorem a 0..n strážemi (§5.3). Dva tvary
     # hlavičky: jednořádková (for i <- 1 to 10 by 2 do) a víceřádková (generátor
@@ -110,7 +111,8 @@ P = [
     ("ForGuardRest",  ("IF", "Expr", "EOL", "ForGuardRest")),
     ("ForGuardRest",  ()),
     ("DoBody",        ("EOL", "INDENT", "Block", "DEDENT")),
-    ("DoBody",        ("Rhs", "EOL")),                   # jednořádkové tělo (jako u if)
+    ("DoBody",        ("Rhs", "LineEnd")),              # jednoradkove telo (jako u if)
+
     # Range: v modelu TO/UNTIL/BY tokeny; v reálném parseru ID + strcmp
     # (technika ifj26/main, fórum „Klíčová slova pri rozšíření CONTROL").
     #  by jen u inkluzivního tvaru (to ... by) - §5.3 výslovně
@@ -120,7 +122,7 @@ P = [
     ("RangeTail",     ("UNTIL", "Expr")),
     ("RangeBy",       ("BY", "Expr")),
     ("RangeBy",       ()),
-    # v5: return umí i volání (strings.scala) - Rhs místo Expr; ε = holé return (otázka 1)
+    # return umí i volání (strings.scala) - Rhs místo Expr; ε = holé return (otázka 1)
     ("ReturnStmt",    ("RETURN", "RhsOpt")),
     ("RhsOpt",        ("Rhs",)),
     ("RhsOpt",        ()),
@@ -161,7 +163,7 @@ PSEUDO = {
                     #  VALMEM/EXTKW: postfix .člen patří výrazové analýze
                     "DOT",
                     "LPAREN"},                   # FUNEXP: f(1) od uloženého ID = volání
-                                              # (THEN/DO vypuštěny - mrtvé buňky, v4)
+                                              # (THEN/DO vypuštěny - mrtvé buňky)
 }
 TERMS = {s for _, r in P for s in r if s not in NT}
 for k in PSEUDO:
@@ -478,10 +480,10 @@ TESTS = [
     ("koncová čárka v argumentech na jednom řádku → chyba 2", W.format("ID LPAREN INT_NUM COMMA RPAREN EOL"), False),
     ("více parametrů", "IMPORT ID DOT MUL EOL DEF ID LPAREN ID COLON INT_TOKEN COMMA ID COLON DOUBLE_TOKEN RPAREN ASSIGN INT_NUM EOL", True),
     ("val s typem na stejném řádku", W.format("VAL ID COLON INT_TOKEN ASSIGN INT_NUM EOL"), True),
-    ("val: typ na řádku, = na dalším → chyba 2 (v4, §4.1)", W.format("VAL ID COLON INT_TOKEN EOL ASSIGN INT_NUM EOL"), False),
+    ("val: typ na řádku, = na dalším → chyba 2 (§4.1)", W.format("VAL ID COLON INT_TOKEN EOL ASSIGN INT_NUM EOL"), False),
     ("val: typ, prázdný řádek, = → chyba 2 (scanner EOLy slučuje)", W.format("VAL ID COLON INT_TOKEN EOL EOL ASSIGN INT_NUM EOL"), False),
-    ("val: typ na řádku, = hlouběji odsazen → chyba 2 (skutečný stream s INDENT, v6)", W.format("VAL ID COLON INT_TOKEN EOL INDENT ASSIGN INT_NUM EOL DEDENT"), False),
-    ("val = a výraz na dalším řádku → chyba 2 (v4)", W.format("VAL ID ASSIGN EOL INDENT INT_NUM EOL DEDENT"), False),
+    ("val: typ na řádku, = hlouběji odsazen → chyba 2 (skutečný stream s INDENT)", W.format("VAL ID COLON INT_TOKEN EOL INDENT ASSIGN INT_NUM EOL DEDENT"), False),
+    ("val = a výraz na dalším řádku → chyba 2", W.format("VAL ID ASSIGN EOL INDENT INT_NUM EOL DEDENT"), False),
     ("val bez typu", W.format("VAL ID ASSIGN INT_NUM EOL"), True),
     ("var bez typu", W.format("VAR ID ASSIGN INT_NUM EOL"), True),
     ("var s typem na stejném řádku", W.format("VAR ID COLON INT_TOKEN ASSIGN INT_NUM EOL"), True),
@@ -509,7 +511,7 @@ TESTS = [
     ("@main s blokem", "IMPORT ID DOT MUL EOL AT ID DEF ID LPAREN RPAREN COLON UNIT_TOKEN ASSIGN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT", True),
     ("prázdné řádky mezi definicemi", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL EOL DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL", True),
     ("prázdné řádky po importu", "IMPORT ID DOT MUL EOL EOL EOL DEF ID LPAREN RPAREN ASSIGN INT_NUM EOL", True),
-    # v6: test „prázdný řádek mezi = a INDENT → chyba 2" odstraněn - scanner EOLy
+    # test „prázdný řádek mezi = a INDENT → chyba 2" odstraněn - scanner EOLy
     # slučuje, stream EOL EOL INDENT nikdy nenastane; jazykově tvar tolerujeme
     # (rozhodnutí §11.4 grammar.md).
     ("žádné definice (jen import)", "IMPORT ID DOT MUL EOL", True),
@@ -642,7 +644,7 @@ TESTS = [
     ("CTRL NEG: for jako výraz", W.format("VAL ID ASSIGN FOR ID LARROW INT_NUM TO INT_NUM DO ID EOL"), False),
     ("CTRL NEG: i <- 1 bez to/until", W.format("FOR ID LARROW INT_NUM DO ID EOL"), False),
     ("CTRL NEG: while stále jen blok", W.format("WHILE ID DO ID EOL"), False),
-    ("CTRL NEG: if c then a; b (jednořáková větev = jeden výraz)", W.format("IF ID THEN ID SEMICOLON ID EOL"), False),
+    ("CTRL: if c then a; b (if-prikaz + b na stejnem radku, §1.2)", W.format("IF ID THEN ID SEMICOLON ID EOL"), True),
     ("CTRL NEG: for tělo bez INDENT", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO VAL ID ASSIGN INT_NUM EOL"), False),
     ("CTRL NEG: visící else (if c then x⏎else y - konzistentní se Scalou)", W.format("IF ID THEN ID EOL ELSE EOL INDENT ID EOL DEDENT"), False),
     # ---- .1 fixes (externí review) ----
@@ -693,10 +695,19 @@ TESTS = [
     ("INT NEG: hole { } v kodu", W.format("LBRACE RBRACE EOL"), False),
     ("INT NEG: interp jako typ", W.format("VAL ID COLON INTERP_START ASSIGN INT_NUM EOL"), False),
     ("INT NEG: s $x + operator (defenzivni tokeny)", W.format("INTERP_START ID PLUS INTERP_END EOL"), False),
-    # ---- .1 fixes (review) ----
+    # ---- fixes po review ----
     ("FIX: -3 na novem radku po break-form -> chyba 2 (1.2)", W.format("VAL ID ASSIGN IF TRUE_TOKEN THEN INT_NUM ELSE EOL INDENT INT_NUM EOL DEDENT MINUS INT_NUM EOL ID LPAREN ID RPAREN EOL"), False),
     ("FIX: kontrola - pokracovani po break-form (novy prikaz)", W.format("VAL ID ASSIGN IF TRUE_TOKEN THEN INT_NUM ELSE EOL INDENT INT_NUM EOL DEDENT ID LPAREN ID RPAREN EOL"), True),
     ("FIX: kontrola - EOL po break-form, pak dalsi prikaz", W.format("VAL ID ASSIGN IF TRUE_TOKEN THEN INT_NUM ELSE EOL INDENT INT_NUM EOL DEDENT EOL VAL ID ASSIGN INT_NUM EOL"), True),
+    # ---- ; za jednoradkovym if/for (review) ----
+    ("FIX: if c then x else y; z (cely if na jednom radku + ;)", W.format("IF TRUE_TOKEN THEN ID LPAREN INT_NUM RPAREN ELSE ID LPAREN INT_NUM RPAREN SEMICOLON ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("FIX: if c then x; y (bez else, ; + dalsi)", W.format("IF ID THEN ID SEMICOLON ID EOL"), True),
+    ("FIX: for ... do x; y (jednoradkove telo + ;)", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO ID LPAREN ID RPAREN SEMICOLON ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("FIX: for ... do print(i); print(3) (review pripad)", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO ID LPAREN ID RPAREN SEMICOLON ID LPAREN INT_NUM RPAREN EOL"), True),
+    ("FIX: if c then x else y; z; w (dve ; za sebou)", W.format("IF ID THEN ID ELSE ID SEMICOLON ID SEMICOLON ID EOL"), True),
+    ("FIX: kontrola - if s blokovou vetvi + ; -> chyba 2 (multi-line)", W.format("IF ID THEN EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT ELSE EOL INDENT VAL ID ASSIGN INT_NUM EOL DEDENT SEMICOLON ID EOL"), False),
+    ("FIX: kontrola - for s blokovym telem + ; -> chyba 2", W.format("FOR ID LARROW INT_NUM TO INT_NUM DO EOL INDENT ID EOL DEDENT SEMICOLON ID EOL"), False),
+    ("FIX: kontrola - if c then x EOL (jen EOL, stale OK)", W.format("IF ID THEN ID EOL"), True),
 ]
 
 # ---------------------------- výstup ----------------------------
