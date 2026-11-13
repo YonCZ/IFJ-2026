@@ -1,6 +1,6 @@
 /*
  * IFJ26 Compiler Implementation
- * 
+ *
  * File: main.c
  * Authors:
  *   Polina Tishaninova (xtishap00) - Leader
@@ -10,13 +10,11 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include "scanner/scanner.h"
+
 #include "parser/parser.h"
-#include "symtable/symtable.h"
-#include "generator/generator.h"
 
 int main(void) {
-    printf("IFJ26 Compiler Initialized\n");
+    parse_program();
+    // TODO: pass the AST to the generator once it is ready
     return 0;
 }
