@@ -283,17 +283,17 @@ static AST_NODE *seq(AST_NODE *a, AST_NODE *b) {
 /* "ruční" varianty uzlů s else_param (obcházejí chybné konstruktory) */
 static AST_NODE *if_manual(AST_NODE *c, AST_NODE *t, AST_NODE *e) {
   AST_NODE *n = mk(NODE_IF, c, t, NULL);
-  n->else_param = e;
+  n->third = e;
   return n;
 }
 static AST_NODE *call_manual(const char *name, AST_NODE *args) {
   AST_NODE *n = named(NODE_CALL, name, NULL, NULL, NULL);
-  n->else_param = args;
+  n->third = args;
   return n;
 }
 static AST_NODE *func_manual(const char *name, AST_NODE *body, AST_NODE *ret, AST_NODE *params) {
   AST_NODE *n = named(NODE_FUNC_DEF, name, body, ret, NULL);
-  n->else_param = params;
+  n->third = params;
   return n;
 }
 
@@ -301,9 +301,9 @@ static AST_NODE *func_manual(const char *name, AST_NODE *body, AST_NODE *ret, AS
  * Pomocná funkce zjistí, jestli se else_param shoduje s očekávaným; nesprávnou kopii uvolní
  * a else_param odpojí (volající pak uvolní `expected` sám). Funguje před i po opravě ast.c. */
 static int detach_else(AST_NODE *n, AST_NODE *expected) {
-  int ok = (n->else_param == expected);
-  if (!ok && n->else_param) t_free((void *)n->else_param);
-  n->else_param = NULL;
+  int ok = (n->third == expected);
+  if (!ok && n->third) t_free((void *)n->third);
+  n->third = NULL;
   return ok;
 }
 
@@ -311,7 +311,7 @@ static size_t count_nodes(const AST_NODE *n) {
   size_t c = 0;
   for (; n; n = n->next) {
     c++;
-    c += count_nodes(n->left) + count_nodes(n->right) + count_nodes(n->else_param);
+    c += count_nodes(n->left) + count_nodes(n->right) + count_nodes(n->third);
   }
   return c;
 }
@@ -471,7 +471,7 @@ TEST(t_create_fields, G1, "nastaví type/left/right/next a vše ostatní vynuluj
   CHECK_PTR(n->left, a);
   CHECK_PTR(n->right, b);
   CHECK_PTR(n->next, c);
-  CHECK_PTR(n->else_param, NULL);
+  CHECK_PTR(n->third, NULL);
   CHECK_PTR(n->name, NULL);
   CHECK_PTR(n->sval, NULL);
   CHECK_INT(n->is_const, 0);
@@ -782,7 +782,7 @@ TEST(t_if_null_else, G5, "ast_if_create(.., NULL, ..) = if bez else (BOOLTHEN) n
   AST_NODE *n = ast_if_create(ID("c"), mk(NODE_BLOCK, NULL, NULL, NULL), NULL, NULL);
   CHECK(n != NULL);
   if (n) {
-    CHECK_PTR(n->else_param, NULL);
+    CHECK_PTR(n->third, NULL);
     free_AST(n);
   }
   check_clean();
@@ -805,7 +805,7 @@ TEST(t_while_slots, G5, "ast_while_create: cond=left, tělo=right, next, typ", 0
   CHECK_PTR(n->left, c);
   CHECK_PTR(n->right, b);
   CHECK_PTR(n->next, nx);
-  CHECK_PTR(n->else_param, NULL);
+  CHECK_PTR(n->third, NULL);
   CHECK_PTR(n->name, NULL);
   free_AST(n);
   check_clean();
@@ -842,7 +842,7 @@ TEST(t_func_def_null_params, G5, "funkce bez parametrů (vč. povinné @main) �
   AST_NODE *f = ast_func_def_create(mk(NODE_BLOCK, NULL, NULL, NULL), NULL, NULL, NULL, (char *)"main");
   CHECK(f != NULL);
   if (f) {
-    CHECK_PTR(f->else_param, NULL);
+    CHECK_PTR(f->third, NULL);
     CHECK_STR(f->name, "main");
     free_AST(f);
   }
@@ -891,7 +891,7 @@ TEST(t_call_null_params, G5, "volání bez argumentů (např. readInt()) – par
   AST_NODE *c = ast_call_create(NULL, (char *)"readInt");
   CHECK(c != NULL);
   if (c) {
-    CHECK_PTR(c->else_param, NULL);
+    CHECK_PTR(c->third, NULL);
     CHECK_STR(c->name, "readInt");
     free_AST(c);
   }
@@ -920,9 +920,9 @@ TEST(t_free_single_with_strings, G6, "uvolní uzel i name a sval", 0) {
 TEST(t_free_full_tree, G6, "uvolní left, right, else_param i next (vč. jejich jmen/řetězců)", 0) {
   AST_NODE *n = named(NODE_IF, "n", named(NODE_IDENT, "l", NULL, NULL, NULL), named(NODE_IDENT, "r", NULL, NULL, NULL),
                       named(NODE_IDENT, "nx", NULL, NULL, NULL));
-  n->else_param = named(NODE_IDENT, "e", NULL, NULL, NULL);
+  n->third = named(NODE_IDENT, "e", NULL, NULL, NULL);
   n->left->sval = t_strdup("s1");
-  n->else_param->sval = t_strdup("s2");
+  n->third->sval = t_strdup("s2");
   n->right->next = named(NODE_IDENT, "r2", lit_s("deep"), NULL, NULL);
   free_AST(n);
   check_clean();
@@ -1434,10 +1434,10 @@ TEST(t_integration_ctors_only, G9, "tentýž program přes konstruktory (jak ho 
   AST_NODE *root = build_program(1);
   int broken = 0;
   for (int i = 0; i < g_n_else_chk; i++)
-    if (g_else_chk[i].node->else_param != g_else_chk[i].expected) {
+    if (g_else_chk[i].node->third != g_else_chk[i].expected) {
       broken++;
-      t_free((void *)g_else_chk[i].node->else_param);
-      g_else_chk[i].node->else_param = NULL;
+      t_free((void *)g_else_chk[i].node->third);
+      g_else_chk[i].node->third = NULL;
     }
   CHECK_MSG(broken == 0, "%d uzlů (volání/funkce) má poškozený else_param", broken);
   if (!broken) {
@@ -1473,7 +1473,7 @@ static AST_NODE *rand_tree(int depth, int *budget) {
   AST_NODE *n = ast_create(NULL, NULL, NULL, (NODE_TYPE)known_nodes[rnd((unsigned)n_known_nodes)]);
   n->left = rand_tree(depth + 1, budget);
   n->right = rand_tree(depth + 1, budget);
-  n->else_param = rand_tree(depth + 1, budget);
+  n->third = rand_tree(depth + 1, budget);
   n->next = rand_tree(depth + 1, budget);
   char buf[16];
   if (rnd(2)) {

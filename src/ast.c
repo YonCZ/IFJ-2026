@@ -75,8 +75,8 @@ AST_NODE * ast_bool_literal_create(bool value,AST_NODE *next) {
 }
 
 
-AST_NODE * ast_ident_create(AST_NODE *left, char *name,AST_NODE *next){
-  AST_NODE *node = ast_create(left,NULL,next, NODE_IDENT);
+AST_NODE * ast_ident_create(AST_NODE *value, char *name,AST_NODE *next){
+  AST_NODE *node = ast_create(value,NULL,next, NODE_IDENT);
   ast_name(node, name);
   return node;
 }
@@ -87,31 +87,31 @@ AST_NODE *ast_assign_create(AST_NODE *ident, AST_NODE *expr, AST_NODE *next) {
 }
 
 //if nothing is returned then NULL
-AST_NODE *ast_return_create(AST_NODE *left, AST_NODE *next) {
-  AST_NODE *node = ast_create(left,NULL,next, NODE_RETURN);
+AST_NODE *ast_return_create(AST_NODE *expr, AST_NODE *next) {
+  AST_NODE *node = ast_create(expr,NULL,next, NODE_RETURN);
   return node;
 }
 
-//nevim jesetli prece neudelam pres tokeny
-AST_NODE * ast_binop_create(AST_NODE *left, AST_NODE *right, AST_NODE *next, OP_TYPE op)
+
+AST_NODE * ast_binop_create(AST_NODE *left, AST_NODE *right_term, AST_NODE *next, OP_TYPE op)
 {
-  AST_NODE *node = ast_create(left, right,next, NODE_BINOP);
+  AST_NODE *node = ast_create(left, right_term,next, NODE_BINOP);
   node->op_type = op;
 
   return node;
 }
 
 
-AST_NODE * ast_unop_create(AST_NODE *left, AST_NODE *next, OP_TYPE op) {
-  AST_NODE *node = ast_create(left, NULL, next, NODE_UNOP);
+AST_NODE * ast_unop_create(AST_NODE *term, AST_NODE *next, OP_TYPE op) {
+  AST_NODE *node = ast_create(term, NULL, next, NODE_UNOP);
   node->op_type = op;
   return node;
 
 }
 
 
-AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is_const, DATA_TYPE declared) { //semantic analyze must check if DATA_NONE
-  AST_NODE *node = ast_create(left, NULL, next, NODE_VAR_DEF);
+AST_NODE * ast_var_def_create(AST_NODE *term,AST_NODE *next, char *name, bool is_const, DATA_TYPE declared) { //semantic analyze must check if DATA_NONE
+  AST_NODE *node = ast_create(term, NULL, next, NODE_VAR_DEF);
   ast_name(node, name);
   node->is_const = is_const;
   node->data_type = declared;
@@ -120,21 +120,21 @@ AST_NODE * ast_var_def_create(AST_NODE *left,AST_NODE *next, char *name, bool is
 
 AST_NODE * ast_if_create(AST_NODE *cond, AST_NODE *then,  AST_NODE *els,AST_NODE *next) {
   AST_NODE *node = ast_create(cond,then, next, NODE_IF);
-  node->else_param = els;
+  node->third = els;
   return node;
 
-} //data type for CONTROL extension, nevim jeslti se to vezme ze sym. table nebo to budu muse implementovat zde
+}
 
-AST_NODE * ast_while_create(AST_NODE *left, AST_NODE *right,AST_NODE *next) {
-  AST_NODE *node = ast_create(left,right, next, NODE_WHILE);
+AST_NODE * ast_while_create(AST_NODE *left, AST_NODE *body,AST_NODE *next) {
+  AST_NODE *node = ast_create(left,body, next, NODE_WHILE);
   return node;
 }
 
-AST_NODE * ast_func_def_create(AST_NODE *body, DATA_TYPE return_type,
-                               AST_NODE *params,AST_NODE *next, char *name, bool is_main, bool has_parens ) {
+AST_NODE * ast_func_def_create(AST_NODE *body,  AST_NODE *params, AST_NODE *next, DATA_TYPE return_type,
+                               char *name, bool is_main, bool has_parens ) {
   AST_NODE *node = ast_create(body,NULL, next, NODE_FUNC_DEF);
   ast_name(node, name);
-  node->else_param = params;
+  node->third = params;
   node->data_type = return_type;
   node->is_main = is_main;
   node->has_parens = has_parens;
@@ -148,31 +148,30 @@ AST_NODE *ast_param_create (DATA_TYPE type, char *name, AST_NODE *next) {
   return node;
 }
 
-//semantic analyze add var_id
 AST_NODE *ast_for_create(AST_NODE *range, AST_NODE *body, AST_NODE *guards, AST_NODE *next, char *name) {
   AST_NODE *node= ast_create(range, body, next, NODE_FOR);
   ast_name(node, name);
-  node->else_param = guards;
+  node->third = guards;
   return node;
 }
 
 AST_NODE *ast_range_create(AST_NODE *from, AST_NODE *to, AST_NODE *step, AST_NODE *next, bool inclusive) {
   AST_NODE *node = ast_create(from,to, next, NODE_RANGE);
-  node->else_param = step;
+  node->third = step;
   node->inclusive = inclusive;
   return node;
 
 }
 
-//is_method x.plus(12) or plus(x, 12)
+
 AST_NODE * ast_call_create(AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next) {
   AST_NODE *node = ast_create(NULL,NULL,next, NODE_CALL);
   ast_name(node, name);
-  node->else_param = params;
+  node->third = params;
   node->is_method = is_method;
   node->has_parens = has_parens;
   return node;
-}  //return type is in sym table
+}
 
 AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next) {
   if (!new_node) return next;
@@ -191,7 +190,7 @@ void free_AST(AST_NODE *node) {
   free_AST(node->left);
   free_AST(node->right);
   free_AST(node->next);
-  free_AST(node->else_param);
+  free_AST(node->third);
   free(node->name);
   free(node->sval);
   free(node);
