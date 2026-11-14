@@ -7,9 +7,10 @@
  * Date: September 2026
  */
 
+#include <ast.h>
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
-void generator_init(void);
+void generator_init(AST_NODE *root);
 
 #endif
