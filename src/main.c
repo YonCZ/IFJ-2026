@@ -14,7 +14,8 @@
 #include "parser/parser.h"
 
 int main(void) {
-    parse_program();
+    AST_NODE *root = parse_program();
     // TODO: pass the AST to the generator once it is ready
+    free_AST(root);
     return 0;
 }
