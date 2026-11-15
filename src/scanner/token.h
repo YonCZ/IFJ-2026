@@ -85,10 +85,16 @@ typedef enum {
     ARROW_FAT_TOKEN,      //=>
     ARROW_LEFT_TOKEN,   //<-
     PIPE_TOKEN,        //|
-    INTERPOLATED_STRING_TOKEN
+    
+    //rozsireni interpolaci
+    INTERP_START_TOKEN, //text od s" po prvni $
+    INTERP_END_TOKEN,   //text mezi dveme interpolacemi
+    INTERP_MID_TOKEN,  //posledni textova cast
+    LBRACE_TOKEN,      //{
+    RBRACE_TOKEN,      //}
 } Tokens;
 
-//tu okomentovat promt ktery jsem pouzivala
+//promt: potrebuju v c u scanneru udrzovat stav mezi volanimi funkce (zasobnik na znaky back_stack, top, current_line a dstring pro retizky). nevim presne jak to nejlip ulozit, myslis ze static promenny takhle na zacatku souboru jsou v pohode? a bude to spravne navazovat na moje vlastni ungetc a fgetc? zkontroluj mi jestli tenhle zapis dává smysl
 typedef struct {
     Tokens type;   //typ tokenu
     char *atribute;  //hodnota textu
