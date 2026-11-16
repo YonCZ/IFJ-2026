@@ -15,7 +15,7 @@
 
 int main(void) {
     AST_NODE *root = parse_program();
-    // TODO: pass the AST to the generator once it is ready
+    // TODO: pass the AST to the generator
     free_AST(root);
     return 0;
 }

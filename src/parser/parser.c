@@ -188,8 +188,6 @@ static void parse_param_list(AST_NODE **head, AST_NODE **tail, int group) {
 }
 
 // Params → ParamGroup Params | ε, one or more () groups.
-// Returns true when the head had parentheses
-// Params → ParamGroup Params | ε, one or more () groups.
 // Returns true when the head had parentheses, groups is their count.
 static bool parse_params(AST_NODE **head, int *groups) {
     AST_NODE *tail = NULL;
@@ -223,15 +221,13 @@ static void parse_opt_eol(void) {
     }
 }
 
-// TEMP expression substitute: literals, identifiers and the () unit.
-// Full expressions are the precedence analysis.
 // FIRST(Expr), tokens that can start an expression.
 static bool is_expr_start(Tokens t) {
     switch (t) {
         case IDENTIFIER_TOKEN: case INT_NUM_TOKEN: case DOUBLE_NUM_TOKEN:
         case STRING_WORD_TOKEN: case LPAR_TOKEN: case PLUS_TOKEN:
         case MINUS_TOKEN: case NOT_TOKEN: case TRUE_TOKEN: case FALSE_TOKEN:
-        case IF_TOKEN: case INTERP_START_TOKEN:
+        case IF_TOKEN: case INTERP_START_TOKEN: case LIST_TOKEN:
             return true;
         default:
             return false;
@@ -254,11 +250,9 @@ static bool is_range_word(Token t) {
 // (same for a comma, the argument separator). In a for header the range
 // words stop it after at least one token. An if expression swallows its
 // then and else, they stop only outside of one.
-static void skip_expression(bool range) {
+static void skip_expression(void) {
     int depth = 0;
-    int start = pos;
     int ifs = 0;
-    bool prev_dot = false;
     for (;;) {
         Token t = parser_peek();
         switch (t.type) {
@@ -280,11 +274,6 @@ static void skip_expression(bool range) {
                 parser_advance();
                 break;
             case IDENTIFIER_TOKEN:
-                // a member name after a dot is not a range word
-                if (range && pos > start && depth == 0 && !prev_dot &&
-                    is_range_word(t)) {
-                    return;
-                }
                 parser_advance();
                 break;
             case IF_TOKEN:
@@ -330,36 +319,93 @@ static void skip_expression(bool range) {
             default:
                 parser_advance();
         }
-        prev_dot = (t.type == DOT_TOKEN);
     }
 }
 
 static AST_NODE *parse_interp(void);
+static void check_range_shape(int start);
 
 // Skips an expression, returns NULL. An interpolated string is parsed
-// and its node returned, the rest of the expression is skipped.
+// and its node returned.
 static AST_NODE *parse_rhs(void) {
     Token t = parser_peek();
     if (t.type == INTERP_START_TOKEN) {
         AST_NODE *node = parse_interp();
-        skip_expression(false);
         return node;
     }
     if (!is_expr_start(t.type)) {
         error_exit(ERROR_SYN, t.line, "syntax error");
     }
-    skip_expression(false);
+    int start = pos;
+    skip_expression();
+    check_range_shape(start);
     return NULL;
 }
 
-// Skips a for range bound, the range words stop it, returns NULL.
-static AST_NODE *parse_rhs_range(void) {
-    Token t = parser_peek();
-    if (!is_expr_start(t.type)) {
-        error_exit(ERROR_SYN, t.line, "syntax error");
+// Range shape on the skipped tokens, one direction, by only after
+// to, per parenthesis level (section 18.2 of the grammar doc).
+// An identifier after a dot or in operand position is a variable,
+// not a range word.
+static void check_range_shape(int start) {
+    int dir[16] = {0};
+    bool by[16] = {false};
+    int depth = 0;
+    bool prev_operand = false;
+    bool prev_dot = false;
+    for (int i = start; i < pos; i++) {
+        Token t = tokens[i];
+        switch (t.type) {
+            case LPAR_TOKEN:
+                if (depth < 15) {
+                    depth++;
+                    dir[depth] = 0;
+                    by[depth] = false;
+                }
+                prev_operand = false;
+                prev_dot = false;
+                continue;
+            case RPAR_TOKEN:
+                if (depth > 0) {
+                    depth--;
+                }
+                prev_operand = true; // a closed expression is an operand
+                prev_dot = false;
+                continue;
+            case DOT_TOKEN:
+                prev_dot = true;
+                continue;
+            case IDENTIFIER_TOKEN:
+                if (!prev_dot && prev_operand && is_range_word(t)) {
+                    if (strcmp(t.atribute, "by") == 0) {
+                        if (dir[depth] != 1 || by[depth]) {
+                            error_exit(ERROR_SYN, t.line, "syntax error");
+                        }
+                        by[depth] = true;
+                    } else {
+                        if (dir[depth] != 0 || by[depth]) {
+                            error_exit(ERROR_SYN, t.line, "syntax error");
+                        }
+                        dir[depth] = (strcmp(t.atribute, "to") == 0) ? 1 : 2;
+                    }
+                    prev_operand = false;
+                    prev_dot = false;
+                    continue;
+                }
+                prev_operand = true;
+                prev_dot = false;
+                continue;
+            case INT_NUM_TOKEN: case DOUBLE_NUM_TOKEN:
+            case STRING_WORD_TOKEN: case TRUE_TOKEN: case FALSE_TOKEN:
+            case LIST_TOKEN:
+                prev_operand = true;
+                prev_dot = false;
+                continue;
+            default:
+                prev_operand = false; // operators and the rest
+                prev_dot = false;
+                continue;
+        }
     }
-    skip_expression(true);
-    return NULL;
 }
 
 static AST_NODE *parse_rhs(void);
@@ -424,6 +470,7 @@ static bool is_stmt_start(Tokens t) {
         case INT_NUM_TOKEN:
         case DOUBLE_NUM_TOKEN: case STRING_WORD_TOKEN: case LPAR_TOKEN:
         case TRUE_TOKEN: case FALSE_TOKEN: case INTERP_START_TOKEN:
+        case LIST_TOKEN:
             return true;
         default:
             return false;
@@ -440,7 +487,9 @@ static AST_NODE *parse_stmt_id_tail(Token id) {
         return node;
     }
     // expression statement from the saved identifier
-    skip_expression(false);
+    int start = pos;
+    skip_expression();
+    check_range_shape(start);
     return NULL;
 }
 
@@ -614,31 +663,6 @@ static void parse_while_stmt(AST_NODE **head, AST_NODE **tail) {
     chain_append(head, tail, node);
 }
 
-// Range → Expr RangeTail, to is inclusive, until is exclusive.
-static AST_NODE *parse_range(void) {
-    int line = parser_peek().line;
-    AST_NODE *from = parse_rhs_range();
-    Token t = parser_peek();
-    if (!is_range_word(t) || strcmp(t.atribute, "by") == 0) {
-        error_exit(ERROR_SYN, t.line, "syntax error"); // expected to or until
-    }
-    bool inclusive = strcmp(t.atribute, "to") == 0;
-    parser_advance();
-    AST_NODE *to = parse_rhs_range();
-    AST_NODE *step = NULL;
-    if (inclusive) { // only the to range has a step
-        Token b = parser_peek();
-        if (b.type == IDENTIFIER_TOKEN && b.atribute != NULL &&
-            strcmp(b.atribute, "by") == 0) {
-            parser_advance();
-            step = parse_rhs_range();
-        }
-    }
-    AST_NODE *node = ast_range_create(from, to, step, NULL, inclusive);
-    node->line = line;
-    return node;
-}
-
 // ForGuardRest → EOL ForGuardRest | IF Expr EOL ForGuardRest | ε
 static AST_NODE *parse_guard_rest(void) {
     AST_NODE *head = NULL;
@@ -688,9 +712,9 @@ static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
         // ForHead → EOL INDENT ForGen ForGuardRest DEDENT DO DoBody
         parser_advance();
         parser_expect(INDENT_TOKEN);
-        id = parser_expect(IDENTIFIER_TOKEN); // ForGen: ID <- Range EOL
+        id = parser_expect(IDENTIFIER_TOKEN); // ForGen: ID <- Expr EOL
         parser_expect(ARROW_LEFT_TOKEN);
-        node->left = parse_range();
+        node->left = parse_rhs();
         parser_expect(EOL_TOKEN);
         node->third = parse_guard_rest();
         parser_expect(DEDENT_TOKEN);
@@ -702,7 +726,7 @@ static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
     // ForHead → ForGenInline DO DoBody
     id = parser_expect(IDENTIFIER_TOKEN);
     parser_expect(ARROW_LEFT_TOKEN);
-    node->left = parse_range();
+    node->left = parse_rhs();
     parser_expect(DO_TOKEN);
     ast_name(node, id.atribute);
     parse_do_body(head, tail, node);
