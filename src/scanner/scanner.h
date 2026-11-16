@@ -11,5 +11,7 @@
 
 //zavola se funkce na scanner
 Token get_token(FILE *f);
+//uvolneni
+void scanner_free();
 
 #endif

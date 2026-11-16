@@ -21,9 +21,8 @@ typedef enum {
 
     INT_STATE,            //DONE
     INT_UNDERSCORE_STATE,      //DONE
-    DOUBLE_DOT_STATE,       //DONE
     DOUBLE_STATE,       //DONE
-    DOUBLE_UNDERSCORE_STATE,      
+    DOUBLE_UNDERSCORE_STATE,
     EXP_START_STATE,
     EXP_SIGN_STATE,       //DONE
     EXP_DIGITS_STATE,      //DONE
@@ -35,7 +34,7 @@ typedef enum {
     EXCLAM_STATE,       //DONE
 
     SLASH_STATE,        //DONE
-    LINE_COMMENT_STATE,     //DONE  
+    LINE_COMMENT_STATE,     //DONE
     BLOCK_COMM_STATE,       //DONE
 
     STRING_STATE,       //DONE
@@ -45,7 +44,12 @@ typedef enum {
     ZERO_STATE,          //DONE
 
     OR_STATE,   //DONE
-    AND_STATE     //DONE 
+    AND_STATE,     //DONE
+
+    INTERP_TEXT_STATE,       //stav pro cteni textu uvnitr interpolovaneho retezce
+    INTERP_ESCAPE_STATE,     //stav pro escape sekvence uvnitr interpolace
+    INTERP_DOLLAR_STATE,     //stav kdyz narazime na dolar v interpolaci
+    INTERP_ID_STATE          //stav pro nacitani promenne po dolaru
 } State;
 
 //prompt: potrebuju v c u scanneru udrzovat stav mezi volanimi funkce (zasobnik na znaky back_stack, top, current_line a dstring pro retizky). nevim presne jak to nejlip ulozit, myslis ze static promenny takhle na zacatku souboru jsou v pohode? a bude to spravne navazovat na moje vlastni ungetc a fgetc? zkontroluj mi jestli tenhle zapis dává smysl 
@@ -60,12 +64,29 @@ static int current_line = 1;
 static DString str;
 //hlida jestli je string inicializovany
 static bool ds_initialized = false;
-//kontrola ze tam je s
-bool interpolated = false;
+
+//prompt: kolega me na Discordu upozornil, ze moje reseni interpolovanych retezcu je spatne. scanner vraci jeden INTERPOLATED_STRING_TOKEN se surovym obsahem, takze by parser musel $id a ${vyraz} znovu skenovat sam a resit $$. navic to nefunguje kdyz je uvnitr ${} dalsi retezec, napr. s"${f("x")}" - retezec skonci na prvni vnitrni uvozovce. jak mam scanner upravit, aby s"..." rozsekal na tokeny podle jeho zadani: INTERP_START (text od s" po prvni $ nebo konec), INTERP_MID (text mezi dvema interpolacemi, jen kdyz neni prazdny), INTERP_END (posledni textova cast), LBRACE pro ${ a RBRACE pro k ni sparovanou }? $id je normalni IDENTIFIER, $$ je jeden dolar, $ pred cislici nebo klicovym slovem je lexikalni chyba 1, LF v jednoradkovem s"..." (i uvnitr ${}) je chyba 1 a existuje i viceradkova varianta s"""..."""
+//prompt: muj prvni navrh (INTERP_BEGIN / INTERP_PART / INTERP_EXPR_BEGIN / INTERP_EXPR_END) nesedi s tim co kolega potrebuje, protoze prvni textova cast ma byt v atributu INTERP_START a posledni v INTERP_END. navic `$klicove_slovo` nehlasil chybu a LF uvnitr ${} v jednoradkovem retezci proslo. prepis to tak, aby to byly normalni stavy v jednom switchi a nebyl potreba flag end_pending
+//zasobnik pro interpolovane retezce, protoze s"..." se muze objevit i uvnitr ${ }; pamatuje si jestli je retezec viceradkovy s"""..."""
+static bool interp_multi[10];
+//vrchol zasobniku pro interpolaci
+static int interp_top = 0;
+//kontrola jestli jsme uvnitr vyrazu v interpolaci
+static bool interp_expr = false;
 
 //funkce na uvolneni stringu 
 static void scanner_cleanup(void) {
     ds_free(&str);
+}
+
+//funkce pro kompletni uvolneni scanneru vcetne interpolace
+void scanner_free(void) {
+    if (ds_initialized) {
+        ds_free(&str);
+        ds_initialized = false;
+    }
+    interp_top = 0;
+    interp_expr = false;
 }
 
 //prompt: potrebuju vyresit cteni a vraceni znaku pri skenovani tokenu. kdyz nactu znak co uz do aktualniho tokenu nepatri nebo musim vratit vic znaku zpatky, protoze mi obyc ungetc nejak nejde a dle tveho pred tim doporuceni bych to musela napsat sama. jak mam presne napsat vlastni funkce fgetc a ungetc s vyuzitim myho back_stacku, aby to nejdriv bralo znaky ze zasobniku a zaroven hlídalo zvysovani/snizovani radku?
@@ -106,6 +127,41 @@ static void in_ungetc (FILE *f, int c) {
     }
 }
 
+/*prompt: kdyz lexikalni chyba nastane primo na znaku konce radku (nedokonceny retezec, `1_` na konci radku, `1e` na konci radku...), hlasi se radek o 1 vetsi, 
+protoze in_fgetc uz current_line zvysil. oprav hlaseni cisla radku*/
+//funkce pro opravu cisla radku pri chybe na konci radku
+static int err_line(int c) {
+    if (c == '\n') {
+        return current_line - 1;
+    }
+    return current_line;
+}
+
+//funkce pro kontrolu, jestli je znak platny pro identifikator
+static bool is_id_char(int c) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+        return true;
+    }
+    return false;
+}
+
+//prompt: jak mam jenomocne napsat funkci, ktera zkontroluje jestli je dane slovo klicove slovo jazyka a vrati true/false? 
+//funkce pro kontrolu klicovych slov
+static bool is_keyword(const char *word) {
+    if (strcmp(word, "if") == 0 || strcmp(word, "for") == 0 || strcmp(word, "while") == 0 ||
+        strcmp(word, "do") == 0 || strcmp(word, "else") == 0 || strcmp(word, "val") == 0 ||
+        strcmp(word, "var") == 0 || strcmp(word, "def") == 0 || strcmp(word, "import") == 0 ||
+        strcmp(word, "return") == 0 || strcmp(word, "then") == 0 || strcmp(word, "Int") == 0 ||
+        strcmp(word, "String") == 0 || strcmp(word, "Double") == 0 || strcmp(word, "Boolean") == 0 ||
+        strcmp(word, "Unit") == 0 || strcmp(word, "true") == 0 || strcmp(word, "false") == 0 ||
+        strcmp(word, "case") == 0 || strcmp(word, "class") == 0 || strcmp(word, "match") == 0 ||
+        strcmp(word, "type") == 0 || strcmp(word, "extension") == 0 || strcmp(word, "List") == 0) {
+        return true;
+    }
+    return false;
+}
+
+//hlavni funkce pro cteni tokenu
 static Token scan_raw(FILE *f) {
     //pokud nastane problem pri uklizeni a rozsireni buf, tak to hodi cleanup
     if (!ds_initialized) {
@@ -118,6 +174,15 @@ static Token scan_raw(FILE *f) {
 
     //zacatek state 
     State state = START_STATE;
+    //kontrola jestli je viceradkovy
+    bool multi_line = false;
+    //kontrola jestli to je prvni cast interpolace
+    bool first_part = false;
+    //pokud jsme v interpolaci ale ne ve vyrazu, tak jdeme cist text
+    if (interp_top > 0 && !interp_expr) {
+        state = INTERP_TEXT_STATE;
+        multi_line = interp_multi[interp_top - 1];
+    }
     //promena aktualni promeny 
     int c;
     //struktura ktera se nenacita 0
@@ -138,11 +203,15 @@ static Token scan_raw(FILE *f) {
             - urcuji se mezery, konec radku nebo souboru, cisla, slova, nebo zakladni znaky jako je napr. *, - , +*/
             case START_STATE:
                 //pokud je to mezera
-                if (c == ' ' || c == '\t') { 
+                if (c == ' ' || c == '\t') {
                     break;
                 }
                 else if (c == '\r') {
                     break;
+                }
+                //kontrola na spatny konec radku v interpolaci
+                else if (c == '\n' && interp_top > 0 && interp_expr && !interp_multi[interp_top - 1]) {
+                    error_exit(ERROR_LEX, err_line(c), "Newline inside ${...} of single-line interpolated string");
                 }
                 //pokud je to konec radku, tak je to EOL_TOKEN
                 else if (c == '\n') {
@@ -150,13 +219,16 @@ static Token scan_raw(FILE *f) {
                     token_found = true;
                     break;
                 }
+                //pokud nahle skonci soubor a jsme v interpolaci
+                else if (c == EOF && interp_top > 0) {
+                    error_exit(ERROR_LEX, current_line, "Unterminated interpolated string literal");
+                }
                 //pokud je to konec souboru, tak je to EOF_TOKEN
                 else if (c == EOF) {
                     token.type = EOF_TOKEN;
                     token_found = true;
                     break;
                 }
-
                 //pokud je to cislo, tak jdeme do stavu INT_STATE
                 else if (c >= '1' && c <= '9') {
                     state = INT_STATE;
@@ -172,8 +244,28 @@ static Token scan_raw(FILE *f) {
                     if (c == 's') {
                         int next = in_fgetc(f);
                         if (next == '"') {
-                            interpolated = true;
-                            state = STRING_STATE;
+                            int q2 = in_fgetc(f);
+                            if (q2 == '"') {
+                                int q3 = in_fgetc(f);
+                                if (q3 == '"') {
+                                    multi_line = true;
+                                }
+                                else {
+                                    in_ungetc(f, q3);
+                                    in_ungetc(f, q2);
+                                }
+                            }
+                            else {
+                                in_ungetc(f, q2);
+                            }
+                            if (interp_top >= 10) {
+                                error_exit(ERROR_INTERNAL, current_line, "Interpolation nesting too deep");
+                            }
+                            interp_multi[interp_top] = multi_line;
+                            interp_top++;
+                            interp_expr = false;
+                            first_part = true;
+                            state = INTERP_TEXT_STATE;
                             break;
                         }
                         in_ungetc(f, next);
@@ -190,7 +282,7 @@ static Token scan_raw(FILE *f) {
                             token_found = true;
                             break;
                         //pokud je to znak + (plus), tak je to PLUS_TOKEN nebo PLUSPLUS_TOKEN
-                        case '+':
+                        case '+': {
                             int next = in_fgetc(f);
                             if (next == '+') {
                                 token.type = PLUSPLUS_TOKEN;
@@ -198,11 +290,11 @@ static Token scan_raw(FILE *f) {
                             }
                             else {
                                 in_ungetc(f, next);
-                                token.type = PLUS_TOKEN; 
+                                token.type = PLUS_TOKEN;
                                 token_found = true;
                             }
-                             break;
-
+                            break;
+                        }
                         //pokud je to - (minus), tak je to MINUS_TOKEN
                         case '-':
                             token.type = MINUS_TOKEN;
@@ -228,12 +320,12 @@ static Token scan_raw(FILE *f) {
                             token.type = RBRACKET_TOKEN;
                             token_found = true;
                             break;
-                        //pokud je to , (carka), tak je to 
+                        //pokud je to , (carka), tak je to COMMA_TOKEN
                         case ',':
                             token.type = COMMA_TOKEN;
                             token_found = true;
                             break;
-                        //pokud je to . (tecka), tak je to bud po kontrole jestli je to pred cislem tak jde do stavu DOUBL_STATE, jinak do DOT_TOKEN
+                        //pokud je to . (tecka), tak je to bud po kontrole jestli je to pred cislem tak jde do stavu DOUBLE_STATE, jinak do DOT_TOKEN
                         case '.': {
                             int next = in_fgetc(f);
                             if (next >= '0' && next <= '9') {
@@ -266,6 +358,11 @@ static Token scan_raw(FILE *f) {
                             }
                             //pokud je to main, tak zkontrolujeme dalsi pismena a je to AT_TOKEN
                             if (strcmp(next_chars, "main") == 0) {
+                                int after = in_fgetc(f);
+                                in_ungetc(f, after);
+                                if (is_id_char(after)) {
+                                    error_exit(ERROR_LEX, err_line(c), "Invalid annotation, expected @main");
+                                }
                                 for (int i = 3; i >= 0; i--) {
                                     in_ungetc(f, next_chars[i]);
                                 }
@@ -274,10 +371,27 @@ static Token scan_raw(FILE *f) {
                             }
                             //jinak nic neni s @, takze je to lexikalni chyba 1
                             else {
-                                error_exit(ERROR_LEX, current_line, "Invalid character @");
+                                int newlines = 0;
+                                for (int i = 0; i < 4; i++) {
+                                    if (next_chars[i] == '\n') {
+                                        newlines++;
+                                    }
+                                }
+                                error_exit(ERROR_LEX, current_line - newlines, "Invalid character @");
                             }
                             break;
                         }
+                        //pokud je to }, tak musime zkontrolovat jestli to neni konec vyrazu v interpolaci
+                        case '}':
+                            if (interp_top > 0 && interp_expr) {
+                                interp_expr = false;
+                                token.type = RBRACE_TOKEN;
+                                token_found = true;
+                            }
+                            else {
+                                error_exit(ERROR_LEX, err_line(c), "Unexpected character");
+                            }
+                            break;
                         //pokud je to _, tak jde to do stavu WORD_STATE (protoze muze to byt string_word nebo cislo, ale resi se to potom co to neni slovo)
                         case '_':
                             ds_push_char(&str, '_');
@@ -295,7 +409,7 @@ static Token scan_raw(FILE *f) {
                         case '/':
                             state = SLASH_STATE;
                             break;
-                        //pokud je too ", tak jde to do STRING_STATE (protozto muze byt slovo)
+                        //pokud je to ", tak jde to do STRING_STATE (protozto muze byt slovo)
                         case '"':
                             state = STRING_STATE;
                             break;
@@ -317,11 +431,11 @@ static Token scan_raw(FILE *f) {
                             break;
                         //jinak je to defaultni chyba neboli lexikalni chyba 1
                         default:
-                            error_exit(ERROR_LEX, current_line, "Unexpected character");
+                            error_exit(ERROR_LEX, err_line(c), "Unexpected character");
                     }
                 }
                 break;
-            
+
             //WORD_STATE = stav, ve kterem se urcuje zda-li existuje nejaky prikaz / klicove slovo / identifikator
             case WORD_STATE:
                 if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
@@ -352,7 +466,7 @@ static Token scan_raw(FILE *f) {
                         token.type = VAR_TOKEN;
                     }
                     else if (strcmp(str.data, "def") == 0) {
-                        token.type = DEF_TOKEN; 
+                        token.type = DEF_TOKEN;
                     }
                     else if (strcmp(str.data, "import") == 0) {
                         token.type = IMPORT_TOKEN;
@@ -399,7 +513,7 @@ static Token scan_raw(FILE *f) {
                     else if (strcmp(str.data, "extension") == 0) {
                         token.type = EXTENSION_TOKEN;
                     }
-                    else if (strcmp(str.data, "List") == 0) { 
+                    else if (strcmp(str.data, "List") == 0) {
                         token.type = LIST_TOKEN;
                     }
                     else if(strcmp(str.data, "_") == 0) {
@@ -414,10 +528,10 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
+
             //SLASH_STATE = stav, ktery urcuje zdali muzeme pocitat lomitko jako deleni nebo jako zacatek komentare
             case SLASH_STATE:
-                //pokud je to slach / tak je to komentar s // a vede to do LINE_COMMENT_STATE
+                //pokud je to slash / tak je to komentar s // a vede to do LINE_COMMENT_STATE
                 if (c == '/') {
                     state = LINE_COMMENT_STATE;
                 }
@@ -427,7 +541,7 @@ static Token scan_raw(FILE *f) {
                     nesting_level = 1;
                     comm_newline = false;
                 }
-                //jinak je to deleni 
+                //jinak je to deleni
                 else {
                     in_ungetc(f, c);
                     token.type = DIV_TOKEN;
@@ -438,9 +552,9 @@ static Token scan_raw(FILE *f) {
 
             //BLOCK_COMM_STATE = stav, ktery urcuje zdali tam je hvezdicka ktera bude ukoncovat komentar 
             case BLOCK_COMM_STATE:
-                //pokud je to konec souboru tak je to lexikalni chyba 
+                //pokud je to konec souboru tak je to lexikalni chyba
                 if(c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Unterminated block comment");
+                    error_exit(ERROR_LEX, err_line(c), "Unterminated block comment");
                 }
                 //pokud je to prazdny radek tak zacian novy radek
                 else if (c == '\n') {
@@ -466,7 +580,7 @@ static Token scan_raw(FILE *f) {
                                 int check;
                                 while ((check = in_fgetc(f)) == ' ' || check == '\t');
                                 if (check != '\n' && check != '\r' && check != EOF) {
-                                    error_exit(ERROR_LEX, current_line, "Disallowed characters after multi-line block comment");
+                                    error_exit(ERROR_LEX, err_line(c), "Disallowed characters after multi-line block comment");
                                 }
                                 in_ungetc(f, check);
                                 token.type = EOL_TOKEN;
@@ -527,7 +641,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud se tam objevi psmeno tak je to lexikalni chyba 1
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Unexpected character in integer literal");
+                    error_exit(ERROR_LEX, err_line(c), "Unexpected character in integer literal");
                 }
                 //jinak je to cislo a patri do tokenu INT_NUM_TOKEN
                 else {
@@ -538,7 +652,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //INT_UNDERSCORE_STATE = stav ve kterem se resi jestli je po _ cislo a jestli se da zapsat
             //pokud po _ pokracuje cislo tak je to spravny zapis 1_000, pokud by tam bylo neco jineho tak je to lexikani chyba
             case INT_UNDERSCORE_STATE:
@@ -547,31 +660,13 @@ static Token scan_raw(FILE *f) {
                     state = INT_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Invalid number format with underscore");
+                    error_exit(ERROR_LEX, err_line(c), "Invalid number format with underscore");
                 }
                 break;
-            
-            //DOUBLE_DOT_STATE = stav kde se kontroluje kam a zajakych podminek se muze oznacit jako tecka v double cisle 
-            //pokud je po . cislo napr.1.000, tak je to spravny zapis, jinak se vraci zpatky na cislo 
-            case DOUBLE_DOT_STATE: //dokoncit tento state 
-                if (c >= '0' && c <= '9') {
-                    ds_push_char(&str, c);
-                    state = DOUBLE_STATE;
-                }
-                else {
-                    in_ungetc(f, c);
-                    in_ungetc(f, '.');
-                    token.type = INT_NUM_TOKEN; 
-                    token.atribute = ds_dup(&str);
-                    token_found = true;
-                    break;
-                }
-                break;
-            
+
             //DOUBLE_STATE =je to stav kde se resi jestli je to double cislo a jake za tim muzou byt dalsi podminky 
-            //pokud je to double, tak zkontrolujeme jestli je to cislo tak je to zase DOUBLE_STATE 
             case DOUBLE_STATE:
-            //pokud je to double, tak zkontrolujeme jestli je to cislo tak je to zase DOUBLE_STATE 
+                //pokud je to double, tak zkontrolujeme jestli je to cislo tak je to zase DOUBLE_STATE 
                 if (c >= '0' && c <= '9') {
                     ds_push_char(&str, c);
                     state = DOUBLE_STATE;
@@ -589,7 +684,7 @@ static Token scan_raw(FILE *f) {
                 else if (c == 'd' || c == 'D') {
                     int next = in_fgetc(f);
                     if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_') {
-                        error_exit(ERROR_LEX, current_line, "Invalid double suffix");
+                        error_exit(ERROR_LEX, err_line(c), "Invalid double suffix");
                     }
                     in_ungetc(f, next);
                     token.type = DOUBLE_NUM_TOKEN;
@@ -599,7 +694,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //to same ale pokud se tam vubec objevi nejake pismeno
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Unexpected character in double literal");
+                    error_exit(ERROR_LEX, err_line(c), "Unexpected character in double literal");
                 }
                 //jinak je to DOUBLE_NUM_TOKEN (double cislo)
                 else {
@@ -610,7 +705,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //DOULE_UNDERSCORE_STATE = je to stav ktery resi jestli je tam po _ cislo 
             case DOUBLE_UNDERSCORE_STATE:
                 if (c <= '9' && c >= '0') {
@@ -619,11 +713,11 @@ static Token scan_raw(FILE *f) {
                 }
                 //vyhodi chybu pokud tam je neco jineho
                 else {
-                    error_exit(ERROR_LEX, current_line, "Invalid double format with underscore");
+                    error_exit(ERROR_LEX, err_line(c), "Invalid double format with underscore");
                 }
                 break;
-            
-            //EXP_START_STATE = stav ktery ma nejaky exp pred cislem tak se urcuje do jakeho stavu patri 
+
+            //EXP_START_STATE = stav ktery ma nejaky exp pred cislem tak se urcuje do jakeho stavu patri
             case EXP_START_STATE:
                 //pokud je + nebo - tak pujdeme do stavu EXP_SIGN_STATE
                 if (c == '+' || c == '-') {
@@ -637,10 +731,10 @@ static Token scan_raw(FILE *f) {
                 }
                 //jinak pokud zadny exp neni tak je to lexikalni chyba 1
                 else {
-                    error_exit(ERROR_LEX, current_line, "Exponent expected");
+                    error_exit(ERROR_LEX, err_line(c), "Exponent expected");
                 }
                 break;
-            
+
             //EXP_SIGN_STATE = je to stav ve kterym se resi jestli po operandu se objevuje cislo a jde do EXP_DIGITS_STATE,jinak je to lexikalni chyba
             case EXP_SIGN_STATE:
                 if (c >= '0' && c <= '9') {
@@ -648,7 +742,7 @@ static Token scan_raw(FILE *f) {
                     state = EXP_DIGITS_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Digit expected in exponent");
+                    error_exit(ERROR_LEX, err_line(c), "Digit expected in exponent");
                 }
                 break;
 
@@ -665,7 +759,7 @@ static Token scan_raw(FILE *f) {
                 else if (c == 'd' || c == 'D') {
                     int next = in_fgetc(f);
                     if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') || next == '_') {
-                        error_exit(ERROR_LEX, current_line, "Invalid exponent suffix");
+                        error_exit(ERROR_LEX, err_line(c), "Invalid exponent suffix");
                     }
                     in_ungetc(f, next);
                     token.type = DOUBLE_NUM_TOKEN;
@@ -675,7 +769,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je nejak epismeno tak je to lexikalni chyba 1
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-                    error_exit(ERROR_LEX, current_line, "Unexpected character after exponent");
+                    error_exit(ERROR_LEX, err_line(c), "Unexpected character after exponent");
                 }
                 //jinak je to cislo a token DOUBLE_NUM_TOKEN
                 else {
@@ -686,7 +780,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //EXP_UNDERSCORE_STATE = je to same jako DOUBLE_UNDERSCORE_STATE
             case EXP_UNDERSCORE_STATE:
                 if (c <= '9' && c >= '0') {
@@ -694,7 +787,7 @@ static Token scan_raw(FILE *f) {
                     state = EXP_DIGITS_STATE;
                 }
                 else {
-                    error_exit(ERROR_LEX, current_line, "Invalid exponent format with underscore");
+                    error_exit(ERROR_LEX, err_line(c), "Invalid exponent format with underscore");
                 }
                 break;
 
@@ -725,7 +818,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je po 0 cislo nebo pismeno tak nemuze zapsat a je to lexikalni chyba
                 else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-                    error_exit(ERROR_LEX, current_line, "Zero literal with invalid suffix");
+                    error_exit(ERROR_LEX, err_line(c), "Zero literal with invalid suffix");
                 }
                 //jinak je to INT_NUM_TOKEN neboli cislo 
                 else {
@@ -736,7 +829,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //ASSIGN_STATE = urcuje dlasi podminky ktere obsahuji =
             case ASSIGN_STATE:
                 //je to EQ_TOKEN ==
@@ -759,7 +851,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //LESS_STATE = stav ktery resi < 
             case LESS_STATE:
                 //pokud je to <=
@@ -782,7 +873,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //GREAT_STATE =resi se s >
             case GREAT_STATE:
                 //je to >=
@@ -799,7 +889,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //EXCLAM_STATE = resi se negace
             case EXCLAM_STATE:
                 //pokud je to !=
@@ -816,7 +905,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //OR_STATE = stav ktery resi znak |
             case OR_STATE:
                 //je to OR_TOKEN ||
@@ -833,7 +921,6 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 break;
-            
             //AND_STATE = stav ktery resi & znak 
             case AND_STATE:
                 if (c == '&') {
@@ -843,7 +930,7 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud to neni && je to lexikalni chyba 1
                 else {
-                    error_exit(ERROR_LEX, current_line, "Expected '&' character for AND operator");
+                    error_exit(ERROR_LEX, err_line(c), "Expected '&' character for AND operator");
                 }
                 break;
 
@@ -857,7 +944,7 @@ static Token scan_raw(FILE *f) {
                         //jinak je to promena MULTILINE_STRING_STATE
                         if (next_c == '"') {
                             state = MULTILINE_STRING_STATE;
-                        } 
+                        }
                         //pokud je tam neco tak je to STRING_WORD_TOKEN (slovo kter se bude vypisovat)
                         else {
                             in_ungetc(f, next_c);
@@ -869,13 +956,6 @@ static Token scan_raw(FILE *f) {
                     //to same pokud tu nejsou "", tak je to promena nebo nazev funkce
                     else {
                         token.type = STRING_WORD_TOKEN;
-                        if (interpolated) {
-                            token.type = INTERPOLATED_STRING_TOKEN;
-                        } 
-                        else {
-                            token.type = STRING_WORD_TOKEN;
-                        }
-                        interpolated = false; 
                         token.atribute = ds_dup(&str);
                         token_found = true;
                     }
@@ -887,14 +967,13 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud je tam konec souboru je to lexikalni chyba 1
                 else if (c == '\n' || c == '\r' || c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Unterminated string literal");
+                    error_exit(ERROR_LEX, err_line(c), "Unterminated string literal");
                 }
-                //jiank se to tam vyoise ze je to nejake slovo 
+                //jiank se to tam vyoise ze je to nejake slovo
                 else {
                     ds_push_char(&str, c);
                 }
                 break;
-            
             //STRING_ESCAPE_STATE = stav ktery resi prazdne mista 
             case STRING_ESCAPE_STATE:
                 if(c == '"') {
@@ -914,58 +993,213 @@ static Token scan_raw(FILE *f) {
                 }
                 //pokud neco z toho se neobjevi tak je to exikalni chyba protoze se radek musi nejak ukoncit lol
                 else {
-                    error_exit(ERROR_LEX, current_line, "Invalid escape sequence");
+                    error_exit(ERROR_LEX, err_line(c), "Invalid escape sequence");
                 }
                 //jinat je to stale nejake slovo ktere se musi nacist 
                 state = STRING_STATE;
                 break;
-            
             //MULTILINE_STRING_STATE = stav ktery resi jake slova se budou vipysovat v ""
             case MULTILINE_STRING_STATE:
                 //pokud je to EOF, je to lexikalni chyba 
                 if(c == EOF) {
-                    error_exit(ERROR_LEX, current_line, "Unterminated multi-line string literal");
+                    error_exit(ERROR_LEX, err_line(c), "Unterminated multi-line string literal");
                 }
-                //jinak jestli tam jsou "", tak se to precte jako nejaky vety ci slova (napr. printf("Toto je moje myslenka v uvozovkach");) a je to STRING_WORD_TOKEN
+                //jinak jestli tam jsou "", tak se to precte jako nejaky vety ci slova
                 else if (c == '"') {
-                    int next = in_fgetc(f);
-                    int nextnext = in_fgetc(f);
-                    if (next == '"' && nextnext == '"') {
-                        token.type = STRING_WORD_TOKEN;
-                        if (interpolated) {
-                            token.type = INTERPOLATED_STRING_TOKEN;
-                        } 
-                        else {
-                            token.type = STRING_WORD_TOKEN;
+                    int quotes = 1;
+                    int q;
+                    while ((q = in_fgetc(f)) == '"') {
+                        quotes++;
+                    }
+                    in_ungetc(f, q);
+                    if (quotes >= 3) {
+                        for (int i = 0; i < quotes - 3; i++) {
+                            ds_push_char(&str, '"');
                         }
-                        interpolated = false; 
+                        token.type = STRING_WORD_TOKEN;
                         token.atribute = ds_dup(&str);
                         token_found = true;
                         break;
                     }
-                    //jinak se to pushne jako dalsi promena ci nazev funkce
-                    else {
-                        in_ungetc(f, nextnext); 
-                        in_ungetc(f, next);
-                        ds_push_char(&str, c);
+                    //to same ze se pushne porotoze tu taky to znamena ze je to nazev neceho 
+                    for (int i = 0; i < quotes; i++) {
+                        ds_push_char(&str, '"');
                     }
                 }
-                //to same ze se pushne porotoze tu taky to znamena ze je to nazev neceho 
                 else {
                     ds_push_char(&str, c);
                 }
                 break;
 
+            //INTERP_TEXT_STATE = stav ktery resi cteni textu v interpolovanem retezci s"..."
+            case INTERP_TEXT_STATE:
+                //pokud je to EOF, je to lexikalni chyba
+                if (c == EOF) {
+                    error_exit(ERROR_LEX, current_line, "Unterminated interpolated string literal");
+                }
+                //pokud jsou to uvozovky tak to muze byt konec
+                else if (c == '"') {
+                    int quotes = 1;
+                    //pokud tam je vice uvozovek tak se to musi resit jinak je to konec interpolace
+                    if (multi_line) {
+                        int q;
+                        //opakuje se pokud tam jsou ty uvozovky 
+                        while ((q = in_fgetc(f)) == '"') {
+                            quotes++;
+                        }
+                        in_ungetc(f, q);
+                    }
+                    //pokud je to vice uvozovek tak se musi resit jinak je to konec interpolace
+                    if (multi_line && quotes < 3) {
+                        for (int i = 0; i < quotes; i++) {
+                            ds_push_char(&str, '"');
+                        }
+                    }
+                    //pokud ne tak se pokracuje dale a resi se jestli je to konec interpolace nebo ne
+                    else {
+                        int closing = 1;
+                        //zase kontrola jestli je to vice uvozovek a resi se jestli je to konec interpolace nebo ne
+                        if (multi_line) {
+                            closing = 3;
+                            //pokud je to vice uvozovek tak se musi resit jinak je to konec interpolace
+                            for (int i = 0; i < quotes - 3; i++) {
+                                ds_push_char(&str, '"');
+                            }
+                        }
+                        //pokud je to prvni cast interpolace tak se musi vratit zpet a resit jestli to neni konec
+                        if (first_part) {
+                            for (int i = 0; i < closing; i++) {
+                                in_ungetc(f, '"');
+                            }
+                            //jinak je to konec a token se musi zapsat jako start
+                            token.type = INTERP_START_TOKEN;
+                        }
+                        //jinak je to konec a token se musi zapsat jako end
+                        else {
+                            interp_top--;
+                            //kontrola jestki je to  konec jinak se zapise jako end token
+                            if (interp_top > 0) {
+                                interp_expr = true;
+                            }
+                            token.type = INTERP_END_TOKEN;
+                        }
+                        //jinak se musi zapsat atribut a token se musi zapsat jako nejaky token
+                        token.atribute = ds_dup(&str);
+                        token_found = true;
+                    }
+                }
+                //pokud narazime na dolar tak jdeme resit promennou
+                else if (c == '$') {
+                    state = INTERP_DOLLAR_STATE;
+                }
+                //pokud narazime na escape sekvenci tak jdeme resit escape sekvence
+                else if (c == '\\' && !multi_line) {
+                    state = INTERP_ESCAPE_STATE;
+                }
+                //pokud narazime na konec radku tak je to lexikalni chyba 1
+                else if ((c == '\n' || c == '\r') && !multi_line) {
+                    error_exit(ERROR_LEX, err_line(c), "Unterminated interpolated string literal");
+                }
+                //jinak se pushuje znak do retezce
+                else {
+                    ds_push_char(&str, c);
+                }
+                break;
+
+            //INTERP_ESCAPE_STATE = stav ktery resi prazdne mista a escape sekvence uvnitr interpolace
+            case INTERP_ESCAPE_STATE:
+                if (c == '"') {
+                    ds_push_char(&str, '"');
+                }
+                else if (c == 'n') {
+                    ds_push_char(&str, '\n');
+                }
+                else if (c == 'r') {
+                    ds_push_char(&str, '\r');
+                }
+                else if (c == 't') {
+                    ds_push_char(&str, '\t');
+                }
+                else if (c == '\\') {
+                    ds_push_char(&str, '\\');
+                }
+                //pokud nic nenalezne tak je to lexikalni chyba 1 protoze se musi nejak ukoncit radek
+                else {
+                    error_exit(ERROR_LEX, err_line(c), "Invalid escape sequence");
+                }
+                state = INTERP_TEXT_STATE;
+                break;
+
+            //INTERP_DOLLAR_STATE = stav ktery se spusti kdyz najdeme $ v interpolaci
+            case INTERP_DOLLAR_STATE:
+                //pokud je tam dalsi dolar tak se vypise jen jeden
+                if (c == '$') {
+                    ds_push_char(&str, '$');
+                    state = INTERP_TEXT_STATE;
+                }
+                //pokud je to zavorka nebo pismeno tak jdeme nacitat promennou
+                else if (c == '{' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
+                    //pokud je to prvni cast interpolace tak se musi zapsat jako INTERP_START_TOKEN
+                    if (first_part) {
+                        in_ungetc(f, c);
+                        in_ungetc(f, '$');
+                        token.type = INTERP_START_TOKEN;
+                        token.atribute = ds_dup(&str);
+                        token_found = true;
+                    }
+                    //pokud je to zavorka tak se musi zapsat jako INTERP_MID_TOKEN
+                    else if (str.len > 0) {
+                        in_ungetc(f, c);
+                        in_ungetc(f, '$');
+                        token.type = INTERP_MID_TOKEN;
+                        token.atribute = ds_dup(&str);
+                        token_found = true;
+                    }
+                    //pokud je to zavorka tak se musi zapsat jako INTERP_MID_TOKEN
+                    else if (c == '{') {
+                        interp_expr = true;
+                        token.type = LBRACE_TOKEN;
+                        token_found = true;
+                    }
+                    //pokud je to pismeno tak se musi zapsat jako INTERP_ID_STATE
+                    else {
+                        ds_push_char(&str, c);
+                        state = INTERP_ID_STATE;
+                    }
+                }
+                //jinak je to lexikalni chyba 1 protoze se musi nejak ukoncit radek
+                else {
+                    error_exit(ERROR_LEX, err_line(c), "Invalid '$' in interpolated string");
+                }
+                break;
+
+            //INTERP_ID_STATE = stav ktery nacita identifikator po $
+            case INTERP_ID_STATE:
+            //pokud je to pismeno nebo cislo tak se to pushuje do retezce
+                if (is_id_char(c)) {
+                    ds_push_char(&str, c);
+                }
+                //pokud je to konec identifikatoru tak se musi zapsat jako IDENTIFIER_TOKEN
+                else {
+                    in_ungetc(f, c);
+                    //kontrola jestli je to _ nebo klicove slovo, pokud ano tak je to lexikalni chyba 1
+                    if (strcmp(str.data, "_") == 0 || is_keyword(str.data)) {
+                        error_exit(ERROR_LEX, err_line(c), "Invalid identifier after '$' in interpolated string");
+                    }
+                    token.type = IDENTIFIER_TOKEN;
+                    token.atribute = ds_dup(&str);
+                    token_found = true;
+                }
+                break;
             //pokud je to nic z toho tak je to interni chyba 99
-            default: 
+            default:
                 error_exit(ERROR_INTERNAL, current_line, "Unknown state in fsm");
         }
     }
-
     //je to konec radku, tak ukonci radek 
     if (token.type == EOL_TOKEN) {
         token.line = current_line - 1;
-    } 
+    }
     //jinak je to pokracuje v radku 
     else {
         token.line = current_line;
@@ -992,13 +1226,15 @@ static int count_indent(FILE *f) {
         //kontrola vsech tabuatoru (tab)
         else if (c == '\t') {
             has_tab = true;
-        } 
+        }
         //kontrola konce radku
         else if (c == '\n') {
             spaces = 0;
             has_tab = false;
-        } 
+        }
         //je to komentar
+        else if (c == '\r') {
+        }
         else if (c == '/') {
             int next = in_fgetc(f);
             //pokud je to //, preskocime vsechno 
@@ -1010,7 +1246,7 @@ static int count_indent(FILE *f) {
                 //po komentari pocitame vsechno od znova
                 spaces = 0;
                 has_tab = false;
-            } 
+            }
             //pokud je to /*, tak preskocime blokovy komentar i s vnorenim
             else if (next == '*') {
                 int nesting_level = 1;
@@ -1053,7 +1289,7 @@ static int count_indent(FILE *f) {
                     }
                     spaces = 0;
                     has_tab = false;
-                } 
+                }
                 //jinak je tam jeste nejaky kod
                 else {
                     //pokud mel komentar novy radek a za nim je kod tak je to lexikalni chyba 1
@@ -1078,8 +1314,8 @@ static int count_indent(FILE *f) {
                 }
                 break;
             }
+        }
         //pokud zase nic neni z toho tak se vratime
-        } 
         else {
             in_ungetc(f, c);
             //pokud je ta, tab, tak je to zase lexikalni chyba 1
@@ -1112,6 +1348,7 @@ Token get_token(FILE *f) {
     static int parents = 0;
     //kontrola jestli je to konec radku 
     static bool last_eol = true;
+    static bool newline_skip = false;
 
     //zaciname tokenem
     Token token = {0};
@@ -1123,7 +1360,6 @@ Token get_token(FILE *f) {
         token.line = current_line;
         return token;
     }
-    
     //pokud zacina radek a zaroven jsou zanedbane zavorky (jsme v nejakych)
     if (line_start && parents == 0) {
         line_start = false;
@@ -1146,19 +1382,19 @@ Token get_token(FILE *f) {
         //pokud je mezer min nez minule musime udelat dedent
         else if (spaces < indent_stack[stack]) {
             //odstranujeme urovne ze zasobniku 
-        while(stack > 0 && spaces < indent_stack[stack]) {
-            stack--;
-            detents_reading++;
-        }
-        //pokud pocet mezer nesedi tak je to lexikalni chyba 1
-        if (indent_stack[stack] != spaces) {
-            error_exit(ERROR_LEX, current_line, "Indentation level does not match any outer level");
-        }
-        //ulozime prvni dedent
-        detents_reading--;
-        token.type = DEDENT_TOKEN;
-        token.line = current_line;
-        return token;
+            while(stack > 0 && spaces < indent_stack[stack]) {
+                stack--;
+                detents_reading++;
+            }
+            //pokud pocet mezer nesedi tak je to lexikalni chyba 1
+            if (indent_stack[stack] != spaces) {
+                error_exit(ERROR_LEX, current_line, "Indentation level does not match any outer level");
+            }
+            //ulozime prvni dedent
+            detents_reading--;
+            token.type = DEDENT_TOKEN;
+            token.line = current_line;
+            return token;
         }
     }
 
@@ -1166,23 +1402,21 @@ Token get_token(FILE *f) {
     token = scan_raw(f);
 
     //pokud je to oteviraci zavorka tak zvetsime parents (vnoreni)
-    if (token.type ==LPAR_TOKEN || token.type == LBRACKET_TOKEN) {
+    if (token.type == LPAR_TOKEN || token.type == LBRACKET_TOKEN || token.type == LBRACE_TOKEN) {
         parents++;
     }
     //pokud jsou tam zaviralici zavorky tak to naopak zmensime
-    else if (token.type == RPAR_TOKEN || token.type == RBRACKET_TOKEN) {
+    else if (token.type == RPAR_TOKEN || token.type == RBRACKET_TOKEN || token.type == RBRACE_TOKEN) {
         if (parents > 0) {
             parents--;
         }
     }
 
-    //promt: proc moje kontroly maji chybu pri vypisovani a hlidani vsech eol 
     //pokud z scan_raw budmeme mit konec souboru
     if (token.type == EOF_TOKEN) {
         //jeste zkontrolujeme konec radku
         if (!last_eol) {
             line_start = true;
-            token.check_new_line = last_eol;
             last_eol = true;
             token.type = EOL_TOKEN;
             token.line = current_line;
@@ -1205,17 +1439,20 @@ Token get_token(FILE *f) {
     if (token.type == EOL_TOKEN) {
         //zavolame znovu funkci pokud se konec radku ignoruje a dostaneme normalni uz vec
         if (parents > 0) {
+            newline_skip = true;
             return get_token(f);
         }
         //to same pokud se tam objevi novy radek tak znova zavolame funkci 
-        line_start =true;
+        line_start = true;
         if (last_eol) {
             return get_token(f);
         }
-        last_eol =true;
+        last_eol = true;
         //jinak vraime tokenyyyy
         return token;
     }
+    token.check_new_line = newline_skip;
+    newline_skip = false;
     //pokud ten token neni eol, tak nastavime posledni enter a vraatime to 
     last_eol = false;
     return token;
