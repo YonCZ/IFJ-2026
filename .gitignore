@@ -9,4 +9,7 @@ compiler
 
 # Submission archives
 *.zip
-*.tar.gz
+*.tar.gztest_ast
+*.dSYM/
+*.o
+.DS_Store
