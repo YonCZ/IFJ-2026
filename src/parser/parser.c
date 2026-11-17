@@ -487,6 +487,7 @@ static void skip_expression(void) {
             case DO_TOKEN: case DEDENT_TOKEN: case EOF_TOKEN:
             case RBRACE_TOKEN:
             case ARROW_FAT_TOKEN: // match guard ends before =>
+            case ASSIGN_TOKEN: // assignment is not an expression
                 return;
             default:
                 parser_advance();
@@ -538,6 +539,15 @@ static void check_range_shape(int start) {
                     depth--;
                 }
                 prev_operand = true; // a closed expression is an operand
+                prev_dot = false;
+                continue;
+            case COMMA_TOKEN:
+                // each argument has its own range shape
+                if (depth < 16) {
+                    dir[depth] = 0;
+                    by[depth] = false;
+                }
+                prev_operand = false;
                 prev_dot = false;
                 continue;
             case DOT_TOKEN:
@@ -674,7 +684,7 @@ static AST_NODE *parse_stmt_id_tail(Token id) {
         return node;
     }
     // expression statement from the saved identifier
-    int start = pos;
+    int start = pos - 1; // include the saved ID in the range check
     skip_expression();
     check_range_shape(start);
     return NULL;
@@ -798,10 +808,11 @@ static AST_NODE *parse_if_else(AST_NODE **head, AST_NODE **tail) {
 
 // IfStmt in the else branch, the node is returned, not chained.
 static AST_NODE *parse_if_branch(AST_NODE **head, AST_NODE **tail) {
-    parser_advance();
+    Token kw = parser_advance();
     AST_NODE *cond = parse_rhs();
     parser_expect(THEN_TOKEN);
     AST_NODE *node = ast_if_create(cond, NULL, NULL, NULL);
+    node->line = kw.line;
     parse_if_then(head, tail, node);
     return node;
 }
@@ -937,6 +948,12 @@ static void parse_block_item(AST_NODE **head, AST_NODE **tail) {
             parse_for_stmt(head, tail);
             return;
         default: {
+            Token st = parser_peek();
+            if (st.type == PLUS_TOKEN || st.type == MINUS_TOKEN ||
+                st.type == NOT_TOKEN) {
+                // logical line cannot start with an operator
+                error_exit(ERROR_SYN, st.line, "syntax error");
+            }
             AST_NODE *item = parse_simple_stmt();
             if (item != NULL) {
                 chain_append(head, tail, item);
