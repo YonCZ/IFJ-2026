@@ -330,7 +330,7 @@ void gen_function(Gen *gen, AST_NODE *fn) {
 }
 
 
-void generate_program(Gen *gen, AST_NODE *root) {
+void generator_init(Gen *gen, AST_NODE *root) {
   printf(".IFJcode26\n");
 
   //finding main function

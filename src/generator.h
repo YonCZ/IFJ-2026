@@ -15,7 +15,7 @@
  *
  *main function
  */
-void generate_program(Gen *gen, AST_NODE *root);
+void generator_init(Gen *gen, AST_NODE *root);
 
 void gen_function(Gen *gen, AST_NODE *fn);
 

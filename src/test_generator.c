@@ -142,6 +142,10 @@ static AST_NODE *build_f1_empty_string(void) {
 static AST_NODE *build_f1_specials(void) {
   return main_prints(print_stmt(lit_s("a b\n\t#\\c"), NULL));
 }
+static AST_NODE *build_f1_control(void) {
+  /* návrat vozíku (13) a znak s kódem 1: všechny znaky 0-32 musí jít jako \\xyz */
+  return main_prints(print_stmt(lit_s("a\rb\001c"), NULL));
+}
 static AST_NODE *build_f1_int(void) { return main_prints(print_stmt(lit_i(42), NULL)); }
 static AST_NODE *build_f1_int_zero(void) { return main_prints(print_stmt(lit_i(0), NULL)); }
 static AST_NODE *build_f1_int_big(void) {
@@ -188,6 +192,9 @@ static const Case CASES[] = {
     {"f1_specials", 1, "main", {NULL}, build_f1_specials,
      "řetězec s mezerou, \\n, tabulátorem, # a zpětným lomítkem", "a b\n\t#\\c",
      {"string@a\\032b\\010\\009\\035\\092c", NULL}},
+    {"f1_control", 1, "main", {NULL}, build_f1_control,
+     "řídicí znaky: \\r (kód 13) a kód 1 se píšou jako \\013 a \\001", "a\rb\001c",
+     {"string@a\\013b\\001c", NULL}},
     {"f1_int", 1, "main", {NULL}, build_f1_int, "print(42)", "42", {NULL}},
     {"f1_int_zero", 1, "main", {NULL}, build_f1_int_zero, "print(0)", "0", {NULL}},
     {"f1_int_big", 1, "main", {NULL}, build_f1_int_big, "print(1234567890123), 64bitové Int",
@@ -808,6 +815,16 @@ labels_done:;
               i + 1);
       break;
     }
+  }
+
+  /* každá funkce musí končit RETURN, i když má prázdné tělo (jinak se spadne do další funkce) */
+  {
+    int n_ret = 0;
+    for (size_t i = 1; i < n; i++)
+      if (strcmp(lines[i], "RETURN") == 0) n_ret++;
+    if (n_ret < nf)
+      problem("funkcí je %d, ale RETURN jen %d. Funkce s prázdným tělem se musí také vrátit "
+              "(PUSHS nil@nil, POPFRAME, RETURN), jinak program propadne do další funkce", nf, n_ret);
   }
 
   /* očekávané zápisy v kódu (např. escape sekvence v řetězci) */
