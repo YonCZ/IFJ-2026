@@ -4,12 +4,14 @@
  * Autor: Pavel Novák [xnovakp01]
  */
 
-#include "generator.h"
-#include <stdio.h>
 #include <ast.h>
+#include <gen_internal.h>
+#include <generator.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-
-// budu potřebovat konst. pro instukce (move, add ...) ale i pro operatory binop atd...
+// budu potřebovat konst. pro instukce (move, add ...) ale i pro operatory binop
+// atd...
 /*
  * frame instructions
  */
@@ -266,26 +268,83 @@ static void generator_recur(Gen *gen,AST_NODE *root) {
   }
 }
 
-char *new_label(Gen *gen, AST_NODE *node) {
-  char *x = node->name + gen->label_counter++;
-  return x;
+/*==========================================================
+ *       nova verze - snad spravna
+*===========================================================
+ */
+
+int new_label(Gen *gen) {
+  return gen->label_counter++;
+}
+
+
+void emit_string_literal(Gen *gen, char *str) {
+  printf("string@");
+  for (char *c = str; *c; c++) {
+    switch (*c) {
+      case 32:
+        printf("\\032");
+        break;
+      case 10:
+        printf("\\010");
+        break;
+      case 9:
+        printf("\\009");
+        break;
+      case 35:
+        printf("\\035");
+        break;
+      case 92:
+        printf("\\092");
+        break;
+      default:
+        putchar(*c);
+    }
+  }
 }
 
 void gen_function(Gen *gen, AST_NODE *fn) {
-  char *label = new_label(gen, fn);
-  printf("LABEL %s\n", label);
+  printf("LABEL $f_%s\n", fn->name);
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
-  printf("PUSHS nil@nil");
+
+  printf("DEFVAR LF@tmp\n");
+  /*        Program
+ *          /  |  \
+ *         /   |   \
+ *      block
+  *     /  |  \
+ *     /   |   \
+ *   stmt
+ */
+
+  //if block is null -> nothing to do
+  if (!fn->left)return;
+
+  for (AST_NODE *node = fn->left->left; node != NULL; node = node->next) {
+    gen_stmt(gen,node);
+  }
+  printf("PUSHS nil@nil\n");
   printf("POPFRAME\n");
   printf("RETURN\n");
 }
-void generate_program(Gen *gen) {
+
+
+void generate_program(Gen *gen, AST_NODE *root) {
   printf(".IFJcode26\n");
-  printf("CREATEFRAME\n");
-  printf("PUSHFRAME\n");
-  printf("CALL @f_main");
 
+  //finding main function
+  AST_NODE *n = root->left;
+  while (n) {
+    if (n->is_main) printf("CALL $f_%s\n", n->name);
+    n = n->next;
+  }
+  printf("EXIT int@0\n");
 
-  printf("EXIT int@0");
+  //emits all functions
+  n = root->left;
+  while (n) {
+    gen_function(gen,n);
+    n = n->next;
+  }
 }

@@ -4,6 +4,8 @@
  * Autor: Pavel Novák [xnovakp01]
  */
 
+#pragma once
+#include <ast.h>
 
 typedef struct {
   int label_counter;
@@ -16,10 +18,10 @@ typedef struct {
 /*
  *create from function name and label counter
  */
-char *new_label(Gen *gen, AST_NODE *node);
+int new_label(Gen *gen);
 
 
 void emit(Gen *gen, char *label);
 
 
-void emit_string_literal(Gen *gem);
+void emit_string_literal(Gen *gem, char *str);
