@@ -119,8 +119,10 @@ static void chain_append(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
     *tail = node;
 }
 
-// Type → one of the five type tokens, error 2 otherwise.
-static DATA_TYPE parse_type(void) {
+static DATA_TYPE parse_type(void);
+
+// TypeAtom → basic token, List[T] or ID (alias / case class).
+static DATA_TYPE parse_type_atom(void) {
     Token t = parser_advance();
     switch (t.type) {
         case INT_TOKEN:     return DATA_INT;
@@ -128,10 +130,28 @@ static DATA_TYPE parse_type(void) {
         case STRING_TOKEN:  return DATA_STRING;
         case UNIT_TOKEN:    return DATA_UNIT;
         case BOOLEAN_TOKEN: return DATA_BOOL;
+        case LIST_TOKEN:
+            parser_expect(LBRACKET_TOKEN);
+            parse_type();
+            parser_expect(RBRACKET_TOKEN);
+            return DATA_NONE;
+        case IDENTIFIER_TOKEN:
+            return DATA_NONE;
         default:
             error_exit(ERROR_SYN, t.line, "syntax error");
             return DATA_NONE;
     }
+}
+
+// Type → TypeAtom TypeUnionRest, union returns DATA_NONE.
+static DATA_TYPE parse_type(void) {
+    DATA_TYPE result = parse_type_atom();
+    while (parser_peek().type == PIPE_TOKEN) {
+        parser_advance();
+        parse_type_atom();
+        result = DATA_NONE;
+    }
+    return result;
 }
 
 // Param → ID COLON Type, group is the index of its parameter list
@@ -205,6 +225,29 @@ static bool parse_params(AST_NODE **head, int *groups) {
     return true;
 }
 
+// TypeDef → TYPE ID ASSIGN Type EOL
+static void parse_type_def(void) {
+    parser_advance();
+    parser_expect(IDENTIFIER_TOKEN);
+    parser_expect(ASSIGN_TOKEN);
+    parse_type();
+    parser_expect(EOL_TOKEN);
+}
+
+// CaseClassDef → CASE CLASS ID LPAREN ParamList RPAREN EOL
+static void parse_case_class(void) {
+    parser_advance();
+    parser_expect(CLASS_TOKEN);
+    parser_expect(IDENTIFIER_TOKEN);
+    parser_expect(LPAR_TOKEN);
+    AST_NODE *head = NULL;
+    AST_NODE *tail = NULL;
+    parse_param_list(&head, &tail, 0);
+    free_AST(head);
+    parser_expect(RPAR_TOKEN);
+    parser_expect(EOL_TOKEN);
+}
+
 // RetType → COLON Type | ε
 static DATA_TYPE parse_ret_type(void) {
     if (parser_peek().type == COLON_TOKEN) {
@@ -235,8 +278,9 @@ static bool is_expr_start(Tokens t) {
 }
 
 static AST_NODE *parse_interp(void);
+static void parse_match_expr(void);
 
-// to, until and by are identifiers checked by strcmp in the for header.
+// to, until and by are IDs checked by strcmp.
 static bool is_range_word(Token t) {
     return t.type == IDENTIFIER_TOKEN && t.atribute != NULL &&
            (strcmp(t.atribute, "to") == 0 ||
@@ -244,12 +288,133 @@ static bool is_range_word(Token t) {
             strcmp(t.atribute, "by") == 0);
 }
 
-// Skips tokens of an expression up to a stopping token. Stopping tokens
-// stay for the caller to consume. Nested parentheses belong inside the
-// expression, only a closing parenthesis at depth zero stops the skip
-// (same for a comma, the argument separator). In a for header the range
-// words stop it after at least one token. An if expression swallows its
-// then and else, they stop only outside of one.
+// PatArg → ID, literal, _, or negative number (flat, no recursion).
+static void parse_pat_arg(void) {
+    Token t = parser_peek();
+    switch (t.type) {
+        case IDENTIFIER_TOKEN: case INT_NUM_TOKEN:
+        case DOUBLE_NUM_TOKEN: case STRING_WORD_TOKEN:
+        case TRUE_TOKEN: case FALSE_TOKEN: case UNDERSCORE_TOKEN:
+            parser_advance();
+            return;
+        case MINUS_TOKEN:
+            parser_advance();
+            if (parser_peek().type == INT_NUM_TOKEN ||
+                parser_peek().type == DOUBLE_NUM_TOKEN) {
+                parser_advance();
+            } else {
+                error_exit(ERROR_SYN, t.line, "syntax error");
+            }
+            return;
+        default:
+            error_exit(ERROR_SYN, t.line, "syntax error");
+    }
+}
+
+// Pattern → literal, _, (), -num, ID PatTail (match branch).
+static void parse_pattern(void) {
+    Token t = parser_peek();
+    switch (t.type) {
+        case INT_NUM_TOKEN: case DOUBLE_NUM_TOKEN:
+        case STRING_WORD_TOKEN: case TRUE_TOKEN: case FALSE_TOKEN:
+        case UNDERSCORE_TOKEN:
+            parser_advance();
+            return;
+        case LPAR_TOKEN: // () = Unit literal
+            parser_advance();
+            parser_expect(RPAR_TOKEN);
+            return;
+        case MINUS_TOKEN: // negative literal
+            parser_advance();
+            if (parser_peek().type == INT_NUM_TOKEN ||
+                parser_peek().type == DOUBLE_NUM_TOKEN) {
+                parser_advance();
+            } else {
+                error_exit(ERROR_SYN, t.line, "syntax error");
+            }
+            return;
+        case IDENTIFIER_TOKEN: {
+            parser_advance();
+            Token next = parser_peek();
+            if (next.type == COLON_TOKEN) { // n: Int
+                parser_advance();
+                parse_type_atom();
+            } else if (next.type == LPAR_TOKEN) { // Point(x, y)
+                parser_advance();
+                if (parser_peek().type != RPAR_TOKEN) {
+                    parse_pat_arg();
+                    while (parser_peek().type == COMMA_TOKEN) {
+                        parser_advance();
+                        parse_pat_arg();
+                    }
+                }
+                parser_expect(RPAR_TOKEN);
+            } else {
+                // binding pattern not supported
+                error_exit(ERROR_SYN, next.line, "syntax error");
+            }
+            return;
+        }
+        default:
+            error_exit(ERROR_SYN, t.line, "syntax error");
+    }
+}
+
+static void skip_expression(void);
+static void check_range_shape(int start);
+static AST_NODE *parse_block(void);
+
+// MatchExpr → EOL INDENT (EOL)* CASE+ DEDENT.
+// Each branch: CASE Pattern [IF Expr] FATARROW body.
+static void parse_match_expr(void) {
+    parser_advance(); // MATCH
+    parser_expect(EOL_TOKEN);
+    parser_expect(INDENT_TOKEN);
+    bool saw_case = false;
+    for (;;) {
+        Token t = parser_peek();
+        if (t.type == EOL_TOKEN) {
+            parser_advance();
+            continue;
+        }
+        if (t.type == DEDENT_TOKEN) {
+            if (!saw_case) {
+                error_exit(ERROR_SYN, t.line, "syntax error");
+            }
+            parser_advance();
+            return;
+        }
+        parser_expect(CASE_TOKEN);
+        parse_pattern();
+        if (parser_peek().type == IF_TOKEN) {
+            parser_advance();
+            if (parser_peek().type == ARROW_FAT_TOKEN) {
+                error_exit(ERROR_SYN, parser_peek().line, "syntax error");
+            }
+            int guard_start = pos;
+            skip_expression();
+            check_range_shape(guard_start);
+        }
+        parser_expect(ARROW_FAT_TOKEN);
+        if (parser_peek().type == EOL_TOKEN) {
+            parser_advance();
+            parser_expect(INDENT_TOKEN);
+            AST_NODE *body = parse_block();
+            free_AST(body); // discard the tree for now
+            parser_expect(DEDENT_TOKEN);
+        } else {
+            int body_start = pos;
+            skip_expression();
+            check_range_shape(body_start);
+            if (parser_peek().type == EOL_TOKEN) {
+                parser_advance();
+            }
+        }
+        saw_case = true;
+    }
+}
+
+// Skips an expression, stopping tokens stay for the caller.
 static void skip_expression(void) {
     int depth = 0;
     int ifs = 0;
@@ -296,6 +461,12 @@ static void skip_expression(void) {
             case INTERP_START_TOKEN: // interpolated string, parsed whole
                 parse_interp();
                 break;
+            case MATCH_TOKEN: // match postfix on an operand
+                parse_match_expr();
+                if (depth == 0) {
+                    return; // expression ends at DEDENT
+                }
+                break;
             case VAL_TOKEN: case VAR_TOKEN: case WHILE_TOKEN:
             case FOR_TOKEN: case RETURN_TOKEN: case DEF_TOKEN:
                 // a statement keyword cannot continue an expression
@@ -315,6 +486,7 @@ static void skip_expression(void) {
             case SEMICOLON_TOKEN:
             case DO_TOKEN: case DEDENT_TOKEN: case EOF_TOKEN:
             case RBRACE_TOKEN:
+            case ARROW_FAT_TOKEN: // match guard ends before =>
                 return;
             default:
                 parser_advance();
@@ -325,12 +497,12 @@ static void skip_expression(void) {
 static AST_NODE *parse_interp(void);
 static void check_range_shape(int start);
 
-// Skips an expression, returns NULL. An interpolated string is parsed
-// and its node returned.
+// Skips an expression, returns NULL or the interp node.
 static AST_NODE *parse_rhs(void) {
     Token t = parser_peek();
     if (t.type == INTERP_START_TOKEN) {
         AST_NODE *node = parse_interp();
+        skip_expression(); // postfix on the interp result (match, .člen)
         return node;
     }
     if (!is_expr_start(t.type)) {
@@ -342,10 +514,7 @@ static AST_NODE *parse_rhs(void) {
     return NULL;
 }
 
-// Range shape on the skipped tokens, one direction, by only after
-// to, per parenthesis level (section 18.2 of the grammar doc).
-// An identifier after a dot or in operand position is a variable,
-// not a range word.
+// Checks range shape on skipped tokens, per parenthesis level.
 static void check_range_shape(int start) {
     int dir[16] = {0};
     bool by[16] = {false};
@@ -398,6 +567,24 @@ static void check_range_shape(int start) {
             case STRING_WORD_TOKEN: case TRUE_TOKEN: case FALSE_TOKEN:
             case LIST_TOKEN:
                 prev_operand = true;
+                prev_dot = false;
+                continue;
+            case MATCH_TOKEN: // skip the whole match block
+                i++; // MATCH
+                // find the INDENT that opens the match block
+                while (i < pos && tokens[i].type != INDENT_TOKEN) {
+                    i++;
+                }
+                if (i < pos) {
+                    int mdepth = 1; // inside the match block
+                    i++;
+                    while (i < pos && mdepth > 0) {
+                        if (tokens[i].type == INDENT_TOKEN) mdepth++;
+                        else if (tokens[i].type == DEDENT_TOKEN) mdepth--;
+                        i++;
+                    }
+                }
+                prev_operand = true; // match result is an operand
                 prev_dot = false;
                 continue;
             default:
@@ -553,7 +740,11 @@ static AST_NODE *parse_simple_stmt(void) {
 }
 
 // LineEnd → EOL | SEMICOLON MidItem
+// After a DEDENT (match or break-form if), no terminator needed.
 static void parse_line_end(AST_NODE **head, AST_NODE **tail) {
+    if (pos > 0 && tokens[pos - 1].type == DEDENT_TOKEN) {
+        return; // multi-line statement, no terminator
+    }
     if (parser_peek().type == EOL_TOKEN) {
         parser_advance();
         return;
@@ -790,7 +981,9 @@ static AST_NODE *parse_body(void) {
         return block;
     }
     AST_NODE *rhs = parse_rhs();
-    parser_expect(EOL_TOKEN);
+    if (pos > 0 && tokens[pos - 1].type != DEDENT_TOKEN) {
+        parser_expect(EOL_TOKEN);
+    }
     return rhs;
 }
 
@@ -873,6 +1066,14 @@ static AST_NODE *parse_func_defs(void) {
         }
         if (t.type == EXTENSION_TOKEN) {
             parse_extension_def(&head, &tail);
+            continue;
+        }
+        if (t.type == TYPE_TOKEN) {
+            parse_type_def();
+            continue;
+        }
+        if (t.type == CASE_TOKEN) {
+            parse_case_class();
             continue;
         }
         if (t.type == EOF_TOKEN) {
