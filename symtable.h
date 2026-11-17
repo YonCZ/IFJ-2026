@@ -27,7 +27,7 @@ typedef enum {
 typedef struct {
     char * key;
     void * value;
-    size_t index_in_table;
+    size_t insert_order; //the order in which the item was inserted into the table
     symtable_slot_status_t status;
 } symtable_item_t;
 
@@ -42,12 +42,12 @@ void symtableFree(symtable_t * table); //ending function, frees the memory alloc
 bool symtableExists(symtable_t * table); //checks if the symtable even exists
 
 //functions for inserting, searching, and deleting items in the symbol table
-bool symtableInsert(symtable_t * table, const char * key, void * value, size_t insert_order);
+bool symtableInsert(symtable_t * table, const char * key, void * value);
 void * symtableSearch(symtable_t * table, const char * key);
 bool symtableDelete(symtable_t * table, const char * key);
 size_t symtableFindIndex(symtable_t * table, const char * key);
 bool symtableCheckForDuplicate(symtable_t * table, const char * key);
-void * symtableGetOrInsert(symtable_t * table, const char * key, void * value, size_t insert_order);
+void * symtableGetOrInsert(symtable_t * table, const char * key, void * value);
 void symtableUpdateValue(symtable_t * table, const char * key, void * new_value);
 size_t symtableSize(symtable_t * table); //returns the number of items in the symbol table
 
