@@ -1,9 +1,13 @@
+/*
+ * IFJ: AST
+ * Soubor: ast.h
+ * Autor: Pavel Novák [xnovakp01]
+ */
+
+
 //comments made by Claude Sonnet 5.5 high
 //input; Mám funkce v ast a chci abys mi udělal komentáře takové že budou vypadat jako stromy, left right, third_node, next a budou popisovat co se tam deje, samozrejme to bude pojmenovane podle parametru. Na ostatni parametry nez node se nedivej
 
-//
-// Created by Pavel Novák on 28.10.2026.
-//
 #pragma once
 #include <stdbool.h>
 
@@ -25,7 +29,6 @@ typedef enum{
   NODE_BINOP,
   NODE_UNOP,  //!
   NODE_LITERAL,
-  NODE_IDENT,
 
   //CONTROL EXTENSION
   NODE_FOR,
@@ -33,6 +36,10 @@ typedef enum{
 
   //INTERPOLADES
   NODE_INTERP,
+
+  //PARAMLIST
+  NODE_LIST_OF_LIST,
+  NODE_PARAM_LIST,
 
   //built ins
   print,
@@ -44,7 +51,8 @@ typedef enum{
   str_length,
   sub_str,
   ord,
-  chr
+  chr,
+  read_boolean
 }NODE_TYPE;
 
 typedef struct AST_NODE AST_NODE;
@@ -93,13 +101,28 @@ struct AST_NODE{
   OP_TYPE op_type;
 
   bool is_extension; //extkw
-  bool is_method; //param
-  bool has_parens; //
+
+  /*
+   *is_method=true
+   *has_parens=false
+   *
+   * x.toString
+   */
+  bool is_method;
+
+  /*
+   *is_method=true
+   *has_paresn=true
+   *
+   * x.plus(12)
+   */
+  bool has_parens;
 
 
   //params
-  int list_no;
-  int more_lists;
+
+  int list_cnt;
+  int list_param_cnt;
 
   char *name;
   bool inclusive;
@@ -121,11 +144,6 @@ AST_NODE * ast_bool_literal_create(bool value,AST_NODE *next);
 AST_NODE * ast_unit_literal_create(AST_NODE *next);
 
 
-AST_NODE * ast_ident_create(AST_NODE *value, char *name,AST_NODE *next);
-/*   IDENT ---next--->
- *     |
- *   value
- */
 
 AST_NODE * ast_binop_create(AST_NODE *left_term, AST_NODE *right_term, AST_NODE *next, OP_TYPE op);
 /*        BINOP ---next--->
@@ -167,20 +185,35 @@ AST_NODE * ast_func_def_create(AST_NODE *body,  AST_NODE *params, AST_NODE *next
  */
 
 
+
+AST_NODE * ast_call_create( AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next);
+/*   CALL ---next--->
+*          /  |  \
+*         /   |   \
+ *      call params
+ */
+
 //is_method
 //yes - x.plus(12)
 //no -  plus(x, 12)
-AST_NODE * ast_call_create( AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next);
+AST_NODE *ast_method_call_create(AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *reciever, AST_NODE *next);
 /*   CALL ---next--->
- *     |
- *   params
+*          /  |
+*         /   |
+ *      call params
+*       /
+*      /
+*     ....
+*     /
+*    /
+*   reciever
  */
 
 AST_NODE *ast_param_create (DATA_TYPE type, char *name, AST_NODE *next);
 /*   PARAM ---next--->
  */
 
-AST_NODE *ast_assign_create(AST_NODE *ident, AST_NODE *expr, AST_NODE *next);
+AST_NODE *ast_assign_create(AST_NODE *var, AST_NODE *expr, AST_NODE *next);
 /*        ASSIGN ---next--->
  *        /    \
  *       /      \
@@ -206,12 +239,34 @@ AST_NODE *ast_range_create(AST_NODE *from, AST_NODE *to, AST_NODE *step, AST_NOD
  *       from   to    step
  */
 
-AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
-/*   new_node ---next---> next ---next---> ...
+AST_NODE *interpolades(AST_NODE *part, AST_NODE *next);
+
+AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, char *name, bool has_parens, bool is_method, DATA_TYPE declared);
+
+
+AST_NODE *ast_create_params_list(AST_NODE *next_param, int list_cnt );
+/*
+ * using ast_append for list linking
+ *
+*             third ---> next_param_list--->..
  */
+
+AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt);
+/*             list ---next--->
+ *           /   |   \
+ *          /    |    \
+ *       params
+ */
+
+
+
+AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
+/*   new_node ---next3---> next2 ---next1---> ...
+*/
+
+
 
 
 
 void free_AST(AST_NODE *node);
 
-void print_AST(AST_NODE *node);

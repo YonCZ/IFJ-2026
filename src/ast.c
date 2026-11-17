@@ -1,6 +1,9 @@
-//
-// Created by Pavel Novák on 07.11.2026.
-//
+/*
+* IFJ: AST
+ * Soubor: ast.c
+ * Autor: Pavel Novák [xnovakp01]
+ */
+
 #include "ast.h"
 
 #include <string.h>
@@ -75,14 +78,9 @@ AST_NODE * ast_bool_literal_create(bool value,AST_NODE *next) {
 }
 
 
-AST_NODE * ast_ident_create(AST_NODE *value, char *name,AST_NODE *next){
-  AST_NODE *node = ast_create(value,NULL,next, NODE_IDENT);
-  ast_name(node, name);
-  return node;
-}
 
-AST_NODE *ast_assign_create(AST_NODE *ident, AST_NODE *expr, AST_NODE *next) {
-  AST_NODE *node = ast_create(ident, expr,next, NODE_ASSIGN);
+AST_NODE *ast_assign_create(AST_NODE *var, AST_NODE *expr, AST_NODE *next) {
+  AST_NODE *node = ast_create(var, expr,next, NODE_ASSIGN);
   return node;
 }
 
@@ -170,6 +168,43 @@ AST_NODE * ast_call_create(AST_NODE *params, char *name, bool is_method, bool ha
   node->third = params;
   node->is_method = is_method;
   node->has_parens = has_parens;
+  return node;
+}
+
+AST_NODE *ast_method_call_create(AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *reciever, AST_NODE *next) {
+  AST_NODE *node = ast_create(reciever,NULL, next, NODE_CALL);
+  node->name = name;
+  node->third = params;
+  node->is_method = is_method;
+  node->has_parens = has_parens;
+  return node;
+}
+
+AST_NODE *interpolades(AST_NODE *part, AST_NODE *next){
+  AST_NODE *node=ast_create(part,NULL,next, NODE_INTERP);
+  return node;
+}
+
+
+AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, char *name, bool has_parens, bool is_method, DATA_TYPE declared){
+  AST_NODE *node = ast_create(expr, NULL, next, NODE_EXPR_STMT);
+  node->third = params;
+  node->name = name;
+  node->is_method = is_method;
+  node->data_type = declared;
+  node->has_parens = has_parens;
+  return node;
+}
+
+AST_NODE *ast_create_params_list_of_list(AST_NODE *next_param_list, int list_cnt) {
+  AST_NODE *node = ast_create(NULL, NULL, next_param_list, NODE_LIST_OF_LIST);
+  node->list_cnt = list_cnt;
+  return node;
+}
+
+AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt) {
+  AST_NODE *node = ast_create(params,NULL, next, NODE_PARAM_LIST);
+  node->list_param_cnt = param_cnt;
   return node;
 }
 

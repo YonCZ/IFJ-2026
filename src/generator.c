@@ -1,10 +1,7 @@
 /*
- * IFJ26 Compiler Implementation
- * 
- * File: generator.c
- * Module: Code Generator (IFJcode26)
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
+* IFJ: Generator
+ * Soubor: generator.c
+ * Autor: Pavel Novák [xnovakp01]
  */
 
 #include "generator.h"
@@ -174,6 +171,18 @@ static void generator_recur(AST_NODE *root) {
        */
       break;
     case NODE_FUNC_DEF:
+      //counter for multiple while or if
+      int counter = 0;
+
+      printf("CREATEFRAME\n");
+      printf("PUSHFRAME\n");
+      //define variables
+      emit_defvars(root);
+
+      //continue on the body of function
+      generator_recur(root->left);
+      generator_recur(root->right);
+
       /*
        *createFrame
        pushFrame
@@ -223,8 +232,6 @@ static void generator_recur(AST_NODE *root) {
       break;
     case NODE_LITERAL:
       break;
-    case NODE_IDENT:
-      break;
 
     case NODE_FOR:
       break;
@@ -264,6 +271,7 @@ void generator_init(AST_NODE *root) {
 
     return;
   }
+
   printf(".IFJcode26\n");
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
