@@ -1,15 +1,193 @@
-/*
- * IFJ26 Compiler Implementation
- * 
- * File: symtable.c
- * Module: Symbol Table
- * Author: [Your Name] ([your_login])
- * Date: September 2026
- */
+/**
+Author: Lucie Alexandrova
+Login: xalexal00
+Part of project IFJ2026
+*/
 
-#include "symtable/symtable.h"
+#include "symtable.h"
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
-void symtable_init(void) {
-    printf("[Symtable] Module initialized\n");
+//function declarations
+
+static size_t symtable_hash(const char * key, size_t table_size){
+    size_t hash = 5381;
+    size_t i = 0;
+    while (key[i] != '\0') {
+        hash = hash * 33 + key[i];
+        i++;
+    }
+    return hash % table_size;
 }
+
+bool symtable_init(symtable_t * table){
+    if (symtable_exists(table)) {
+        return true; // already initialized
+    }
+    table->size = SYMTABLE_BASE_SIZE;
+    table->count = 0;
+    table->items = (symtable_item_t *)calloc(table->size, sizeof(symtable_item_t));
+    if (table->items == NULL) {
+        return false; //allocation failed
+    }
+    for (size_t i = 0; i < table->size; i++) {
+        table->items[i].status = SLOT_EMPTY;
+    }
+    return true; //allocation of empty table successful
+}
+
+void symtable_free(symtable_t * table){
+    if (symtable_exists(table) == false) {
+        return; //table does not exist
+    }
+
+    if (table->items == NULL) {
+        return; //table is already empty
+    }
+    //not empty
+    for (size_t i = 0; i < table->size; i++) { 
+        if (table->items[i].status == SLOT_OCCUPIED) {
+            free(table->items[i].key); //only empties the table, does not get rid of the value completely, because it is only a pointer
+        }
+    }
+    free(table->items);
+}
+
+static bool symtable_resize(symtable_t * table){
+    if (symtable_exists(table) == false) {
+        return false; //table does not exist
+    }
+    size_t new_size = table->size * 2 + 1;
+    symtable_item_t * new_items = (symtable_item_t *)calloc(new_size, sizeof(symtable_item_t));
+    if (new_items == NULL) {
+        return false; //allocation failed
+    }
+    //if succesful, copy the old items to the new table
+    for (size_t i = 0; i < table->size; i++) {
+        if (table->items[i].status == SLOT_OCCUPIED) {
+            size_t new_index = symtable_hash(table->items[i].key, new_size);
+            while (new_items[new_index].status != SLOT_EMPTY) {
+                new_index = (new_index + 1) % new_size;
+            }
+            new_items[new_index] = table->items[i];
+        }
+    }
+    free(table->items);
+    table->items = new_items;
+    table->size = new_size;
+    return true;
+}
+
+bool symtable_exists(symtable_t * table){
+    return table->items != NULL;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//functions for inserting, searching, and deleting items in the symbol table
+bool symtable_check_for_duplicate(symtable_t * table, const char * key){
+    if (symtable_exists(table) == false) {
+        return false; //table does not exist, so no duplicates
+    }
+    return symtable_search(table, key) != NULL;
+}
+void * symtable_get_or_insert(symtable_t * table, const char * key, void * value, size_t insert_order){
+    void * found = symtable_search(table, key);
+    if (found == -1) {
+        return NULL; //key not found
+    }
+    return found;
+}
+bool symtable_insert(symtable_t * table, const char * key, void * value, size_t insert_order){
+    if (symtable_exists(table) == false) {
+        return false; //table does not exist
+    }
+    if (symtable_check_for_duplicate(table, key)) {
+        return false; //key already exists
+    }
+    //key does not exist, so we can insert it
+    size_t index = symtable_hash(key, table->size);
+    while (table->items[index].status == SLOT_OCCUPIED) {
+        index = (index + 1) % table->size; //goes through the table until it finds an empty slot
+    }
+    table->items[index].key = (char *)malloc(strlen(key) + 1); //allocates memory for the key + '\0'
+    if (table->items[index].key == NULL) {
+        return false; //allocation failed
+    }
+    strcpy(table->items[index].key, key); //inserts the key into the table
+    table->items[index].value = value;
+    table->items[index].status = SLOT_OCCUPIED;
+    table->count++;
+    table->items[index].index_in_table = insert_order;
+
+    //check if the table needs to be resized
+    if (table->count >= SYMTABLE_MAX_LOAD * table->size) {
+        if (!symtable_resize(table)) {
+            return false; //resize failed
+        }
+    }
+    return true;
+}
+void * symtable_search(symtable_t * table, const char * key){
+    for (size_t i = 0; i < table->size; i++) {
+        if (table->items[i].status == SLOT_OCCUPIED && strcmp(table->items[i].key, key) == 0) {
+            return table->items[i].value;
+        }
+    }
+    return -1; //did not find the key in the table
+}
+
+void * symtable_find_index(symtable_t * table, const char * key){
+    for (size_t i = 0; i < table->size; i++) {
+        if (table->items[i].status == SLOT_OCCUPIED && strcmp(table->items[i].key, key) == 0) {
+            return i;
+        }
+    }
+    return -1; //did not find the key in the table
+}
+
+bool symtable_delete(symtable_t * table, const char * key){
+    for (size_t i = 0; i < table->size; i++) {
+        if (table->items[i].status == SLOT_OCCUPIED && strcmp(table->items[i].key, key) == 0) {
+            free(table->items[i].key);
+            table->items[i].status = SLOT_DELETED;
+            table->count--;
+            return true; //successfully deleted the item
+        }
+    }
+    return false; //did not find the key in the table
+}
+
+void * symtable_get_or_insert(symtable_t * table, const char * key, void * value, size_t insert_order){
+    void * found = symtable_search(table, key);
+    if (found == -1) {
+        if (!symtable_insert(table, key, value, insert_order)) {
+            return NULL; //failed to insert the key
+        }
+        return value;
+    }
+    return found;
+}
+void symtable_update_value(symtable_t * table, const char * key, void * new_value){
+    int i = symtable_find_index(table, key);
+    if (i != -1) {
+        table->items[i].value = new_value;
+    }
+}
+size_t symtable_size(symtable_t * table){
+    return table->count;
+}
+
+void symtable_print(symtable_t * table){
+    if (symtable_exists(table) == false) {
+        printf("Symbol table does not exist.\n");
+        return;
+    }
+    printf("Symbol Table Size: %zu, Count: %zu\n, Table load: %.2f\n", table->size, table->count, (double)table->count / table->size);
+    printf("Symbol Table Contents:\n");
+    for (size_t i = 0; i < table->size; i++) {
+        if (table->items[i].status == SLOT_OCCUPIED) {
+            printf("Index: %zu, Key: %s, Value: %p, Insert Order: %zu\n", i, table->items[i].key, table->items[i].value, table->items[i].index_in_table);
+        }
+    }
+} //prints the contents of the symbol table for debugging

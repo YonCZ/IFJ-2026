@@ -129,35 +129,35 @@ void print_defvar(AST_NODE *node) {
     printf("LF@%s$%d\n", node->name,node->id);
   }
 }
-void emit_defvars(AST_NODE *node) {
+void emit_defvars(Gen *gen, AST_NODE *node) {
   if (!node)return;
 
   if (node->left != NULL) {
     print_defvar(node->left);
-    emit_defvars(node->left);
+    emit_defvars(gen,node->left);
   }
   if (node->right != NULL) {
     print_defvar(node->right);
-    emit_defvars(node->right);
+    emit_defvars(gen,node->right);
   }
   if (node->third) {
     print_defvar(node->third);
-    emit_defvars(node->third);
+    emit_defvars(gen,node->third);
   }
 
-  emit_defvars(node->next);
+  emit_defvars(gen,node->next);
 }
 
-static void generator_recur(AST_NODE *root);
+static void generator_recur(Gen *gen, AST_NODE *root);
 
 //pro napojovani funkci pres next
-void gen_list(AST_NODE *node) {
+void gen_list(Gen *gen, AST_NODE *node) {
   while (node != NULL) {
-    generator_recur(node);
+    generator_recur(gen,node);
     node = node->next;
   }
 }
-static void generator_recur(AST_NODE *root) {
+static void generator_recur(Gen *gen,AST_NODE *root) {
   if (!root)return;
   //TODO
   //kazdy case si deti rozpracuje sam
@@ -177,11 +177,11 @@ static void generator_recur(AST_NODE *root) {
       printf("CREATEFRAME\n");
       printf("PUSHFRAME\n");
       //define variables
-      emit_defvars(root);
+      emit_defvars(gen,root);
 
       //continue on the body of function
-      generator_recur(root->left);
-      generator_recur(root->right);
+      generator_recur(gen,root->left);
+      generator_recur(gen,root->right);
 
       /*
        *createFrame
@@ -266,14 +266,26 @@ static void generator_recur(AST_NODE *root) {
   }
 }
 
-void generator_init(AST_NODE *root) {
-  if (root == NULL) {
+char *new_label(Gen *gen, AST_NODE *node) {
+  char *x = node->name + gen->label_counter++;
+  return x;
+}
 
-    return;
-  }
-
+void gen_function(Gen *gen, AST_NODE *fn) {
+  char *label = new_label(gen, fn);
+  printf("LABEL %s\n", label);
+  printf("CREATEFRAME\n");
+  printf("PUSHFRAME\n");
+  printf("PUSHS nil@nil");
+  printf("POPFRAME\n");
+  printf("RETURN\n");
+}
+void generate_program(Gen *gen) {
   printf(".IFJcode26\n");
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
-  generator_recur(root);
+  printf("CALL @f_main");
+
+
+  printf("EXIT int@0");
 }

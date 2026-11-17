@@ -6,9 +6,21 @@
 
 
 #include <ast.h>
+#include <gen_internal.h>
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
-void generator_init(AST_NODE *root);
+// TODO prelozit
+/* volajici vyhodnoti zleva do prava
+ *
+
+/*
+ *main function
+ */
+void generate_program(Gen *gen);
+
+void gen_function(Gen *gen, AST_NODE *fn);
+
+void emit_defvars(Gen *gen, AST_NODE *body);
 
 #endif

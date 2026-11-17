@@ -173,7 +173,7 @@ AST_NODE * ast_call_create(AST_NODE *params, char *name, bool is_method, bool ha
 
 AST_NODE *ast_method_call_create(AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *reciever, AST_NODE *next) {
   AST_NODE *node = ast_create(reciever,NULL, next, NODE_CALL);
-  node->name = name;
+  ast_name(node, name);
   node->third = params;
   node->is_method = is_method;
   node->has_parens = has_parens;
@@ -189,7 +189,7 @@ AST_NODE *interpolades(AST_NODE *part, AST_NODE *next){
 AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, char *name, bool has_parens, bool is_method, DATA_TYPE declared){
   AST_NODE *node = ast_create(expr, NULL, next, NODE_EXPR_STMT);
   node->third = params;
-  node->name = name;
+  ast_name(node, name);
   node->is_method = is_method;
   node->data_type = declared;
   node->has_parens = has_parens;

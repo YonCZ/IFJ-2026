@@ -244,7 +244,7 @@ AST_NODE *interpolades(AST_NODE *part, AST_NODE *next);
 AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, char *name, bool has_parens, bool is_method, DATA_TYPE declared);
 
 
-AST_NODE *ast_create_params_list(AST_NODE *next_param, int list_cnt );
+AST_NODE *ast_create_params_list_of_list(AST_NODE *next_param_list, int list_cnt);
 /*
  * using ast_append for list linking
  *
