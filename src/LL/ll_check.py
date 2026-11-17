@@ -16,7 +16,9 @@ P = [
     ("Prolog",        ("IMPORT", "ID", "DOT", "MUL", "EOL")),
     ("FuncDefs",      ("EOL", "FuncDefs")),
     ("FuncDefs",      ("FuncDef", "FuncDefs")),
-    ("FuncDefs",      ("ExtensionDef", "FuncDefs")),   #  EXTKW: extension blok mezi definicemi
+    ("FuncDefs",      ("ExtensionDef", "FuncDefs")),
+    ("FuncDefs",      ("TypeDef", "FuncDefs")),         # ALGEBDT
+    ("FuncDefs",      ("CaseClassDef", "FuncDefs")),   #  EXTKW: extension blok mezi definicemi
     ("FuncDefs",      ()),
     ("FuncDef",       ("DEF", "ID", "Params", "RetType", "ASSIGN", "Body")),
     ("FuncDef",       ("AT", "ID", "OptEol", "DEF", "ID", "Params", "RetType", "ASSIGN", "Body")),
@@ -26,6 +28,8 @@ P = [
     ("ExtDefs",       ("FuncDef", "ExtDefs")),      # @main uvnitř = sémantika, ne tvar
     ("ExtDefs",       ()),
     #  anotace @main může být na samostatném řádku (§2 PDF) - OptEol = EOL | ε
+    ("TypeDef",       ("TYPE", "ID", "ASSIGN", "Type", "EOL")),
+    ("CaseClassDef",  ("CASE", "CLASS", "ID", "LPAREN", "ParamList", "RPAREN", "EOL")),
     ("OptEol",        ("EOL",)),
     ("OptEol",        ()),
     #  PARAMLISTS: 0..n skupin parametrů - Params je nullable celek
@@ -42,12 +46,17 @@ P = [
     ("Param",         ("ID", "COLON", "Type")),
     ("RetType",       ("COLON", "Type")),
     ("RetType",       ()),
-    ("Type",          ("INT_TOKEN",)),
-    ("Type",          ("DOUBLE_TOKEN",)),
-    ("Type",          ("STRING_TOKEN",)),
-    ("Type",          ("UNIT_TOKEN",)),
-    ("Type",          ("BOOLEAN_TOKEN",)),   # BOOLTHEN
-    ("Type",          ("LIST_TOKEN", "LBRACK", "Type", "RBRACK")),  # LISTS: List[T]
+    # ALGEBDT: Type = atom + sjednoceni (leva faktorizace)
+    ("Type",          ("TypeAtom", "TypeUnionRest")),
+    ("TypeAtom",      ("INT_TOKEN",)),
+    ("TypeAtom",      ("DOUBLE_TOKEN",)),
+    ("TypeAtom",      ("STRING_TOKEN",)),
+    ("TypeAtom",      ("UNIT_TOKEN",)),
+    ("TypeAtom",      ("BOOLEAN_TOKEN",)),   # BOOLTHEN
+    ("TypeAtom",      ("LIST_TOKEN", "LBRACK", "Type", "RBRACK")),  # LISTS
+    ("TypeAtom",      ("ID",)),              # ALGEBDT: alias / case class
+    ("TypeUnionRest", ("PIPE", "TypeAtom", "TypeUnionRest")),
+    ("TypeUnionRest", ()),
     ("Body",          ("Rhs", "EOL")),
     ("Body",          ("EOL", "INDENT", "Block", "DEDENT")),
     ("Block",         ("BlockItem", "StmtRest")),
@@ -133,6 +142,32 @@ P = [
     ("InterpContent", ("ID", "InterpContent")),
     ("InterpContent", ("INTERP_MID", "InterpContent")),
     ("InterpContent", ("INTERP_END",)),
+    # ALGEBDT: Pattern satelit (volany z match handleru, §19)
+    ("Pattern",    ("INT_NUM",)),
+    ("Pattern",    ("DOUBLE_NUM",)),
+    ("Pattern",    ("STRING_LITERAL",)),
+    ("Pattern",    ("TRUE_TOKEN",)),
+    ("Pattern",    ("FALSE_TOKEN",)),
+    ("Pattern",    ("UNDERSCORE",)),
+    ("Pattern",    ("LPAREN", "RPAREN")),
+    ("Pattern",    ("MINUS", "PatNeg")),
+    ("Pattern",    ("ID", "PatTail")),
+    ("PatTail",    ("COLON", "TypeAtom")),
+    ("PatTail",    ("LPAREN", "PatList", "RPAREN")),
+    ("PatNeg",     ("INT_NUM",)),
+    ("PatNeg",     ("DOUBLE_NUM",)),
+    ("PatList",    ("PatArg", "PatRest")),
+    ("PatList",    ()),
+    ("PatRest",    ("COMMA", "PatArg", "PatRest")),
+    ("PatRest",    ()),
+    ("PatArg",     ("ID",)),
+    ("PatArg",     ("INT_NUM",)),
+    ("PatArg",     ("DOUBLE_NUM",)),
+    ("PatArg",     ("STRING_LITERAL",)),
+    ("PatArg",     ("TRUE_TOKEN",)),
+    ("PatArg",     ("FALSE_TOKEN",)),
+    ("PatArg",     ("UNDERSCORE",)),
+    ("PatArg",     ("MINUS", "PatNeg")),
 ]
 # FUNEXP: argumenty jsou VÝRAZY (§5.1) - seznam argumentů zpracovává
 # VÝRAZOVÁ analýza (zde _args(), v parseru sdílený parse_arg_list s metodami;
@@ -160,6 +195,8 @@ PSEUDO = {
                     "DOT",
                     #  LISTS: rozsahy a ++ od uloženého ID (§18.2)
                     "TO", "UNTIL", "BY", "PLUSPLUS",
+                    #  ALGEBDT: match od uloženého ID (§19.2)
+                    "MATCH",
                     "LPAREN"},                   # FUNEXP: f(1) od uloženého ID = volání
                                               # (THEN/DO vypuštěny - mrtvé buňky)
 }
@@ -304,6 +341,62 @@ def _if_expr(toks, i):
     return i, ok
 
 
+def _match_block(toks, i):
+    """ALGEBDT: konzumuje match blok EOL INDENT (EOL)* CASE+ DEDENT.
+    Každou větev validuje: CASE Pattern [IF Expr] FATARROW tělo.
+    Vrací index za DEDENT, nebo None při chybě."""
+    i += 1  # za MATCH
+    if i >= len(toks) or toks[i][0] != "EOL":
+        return None
+    i += 1
+    if i >= len(toks) or toks[i][0] != "INDENT":
+        return None
+    i += 1
+    # prázdné řádky
+    while i < len(toks) and toks[i][0] == "EOL":
+        i += 1
+    # větve: alespoň jedna CASE, pak další nebo DEDENT
+    saw_case = False
+    while i < len(toks):
+        t = toks[i][0]
+        if t == "EOL":
+            i += 1
+            continue
+        if t == "DEDENT":
+            if not saw_case:
+                return None  # prázdný match
+            return i + 1  # za DEDENT
+        if t != "CASE":
+            return None  # něco jiného než CASE/EOL/DEDENT mezi větvemi
+        # --- jedna větev: CASE Pattern [IF Expr] FATARROW tělo ---
+        i += 1  # za CASE
+        # Pattern přes tabulkový satelit
+        i, ok = _run(toks, i, ["Pattern"])
+        if not ok:
+            return None
+        # volitelná stráž
+        if i < len(toks) and toks[i][0] == "IF":
+            i += 1
+            j, ok = greedy(toks, i, "Expr")
+            if not ok:
+                return None
+            i = j
+        # FATARROW povinný
+        if i >= len(toks) or toks[i][0] != "FATARROW":
+            return None
+        i += 1
+        # Prompt pro AI: „Muzes to upravit aby to sedelo konecne“
+        # po review prázdného těla, neplatného bloku a dvou case na řádku.
+        i, ok = _if_branch(toks, i)
+        if not ok:
+            return None
+        if toks[i][0] == "EOL":
+            i += 1
+        elif toks[i - 1][0] != "DEDENT":
+            return None
+        saw_case = True
+    return None  # neuzavřený blok
+
 def greedy(toks, i, kind):
     """Aproximace výrazové analýzy: konzumuje výraz, na stopping tokenu se
     zastaví BEZ konzumace. kind=ExprFromId → začíná ve stavu 'operátor'
@@ -402,6 +495,18 @@ def greedy(toks, i, kind):
                     after_operand = True
                 else:
                     return i, False              # visící tečka - neúplný výraz
+            elif t == "MATCH":                   # ALGEBDT: match postfix na operandu
+                # match je imperativní satelit - konzumuje celý blok
+                # EOL INDENT (EOL)* CASE+ DEDENT přes _match_block()
+                j = _match_block(toks, i)
+                if j is None:
+                    return i, False
+                i = j
+                inside[-1] += 1
+                # Výraz končí DEDENTem match bloku — další token patří
+                # nadřazenému příkazu, ne postfixu na výsledku match.
+                if depth == 0:
+                    return i, True
             elif t == "LPAREN" and after_operand: # : volání na libovolném operandu
                 j = _args(toks, i)
                 if j is None:
@@ -757,7 +862,52 @@ TESTS = [
     ("LISTS: regrese - def f = List(1), tělo od LIST_TOKEN", "IMPORT ID DOT MUL EOL DEF ID ASSIGN LIST_TOKEN LPAREN INT_NUM RPAREN EOL", True),
     ("LISTS: regrese - return List(1)", W.format("RETURN LIST_TOKEN LPAREN INT_NUM RPAREN EOL"), True),
     ("LISTS: regrese - samostatný List(1) jako příkaz", W.format("LIST_TOKEN LPAREN INT_NUM RPAREN EOL"), True),
-    ("LISTS: regrese - val x = List(List(1))", W.format("VAL ID ASSIGN LIST_TOKEN LPAREN LIST_TOKEN LPAREN INT_NUM RPAREN RPAREN EOL"), True),
+    ("LISTS: regrese - val x = List(List(1))", W.format("VAL ID ASSIGN LIST_TOKEN LPAREN LIST_TOKEN LPAREN INT_NUM RPAREN RPAREN EOL"), True),    # ---- ALGEBDT (§19) ----
+    ("ALG: type alias = Int | Double | String", "IMPORT ID DOT MUL EOL TYPE ID ASSIGN INT_TOKEN PIPE DOUBLE_TOKEN PIPE STRING_TOKEN EOL", True),
+    ("ALG: type alias jednoprvkovy", "IMPORT ID DOT MUL EOL TYPE ID ASSIGN INT_TOKEN EOL", True),
+    ("ALG: case class s jednim parametrem", "IMPORT ID DOT MUL EOL CASE CLASS ID LPAREN ID COLON INT_TOKEN RPAREN EOL", True),
+    ("ALG: case class s vice parametry", "IMPORT ID DOT MUL EOL CASE CLASS ID LPAREN ID COLON INT_TOKEN COMMA ID COLON INT_TOKEN RPAREN EOL", True),
+    ("ALG: case class prazdny", "IMPORT ID DOT MUL EOL CASE CLASS ID LPAREN RPAREN EOL", True),
+    ("ALG: type + case class + def", "IMPORT ID DOT MUL EOL TYPE ID ASSIGN INT_TOKEN EOL CASE CLASS ID LPAREN ID COLON INT_TOKEN RPAREN EOL DEF ID LPAREN RPAREN COLON INT_TOKEN ASSIGN INT_NUM EOL", True),
+    ("ALG: inline sjednoceni v parametru", "IMPORT ID DOT MUL EOL DEF ID LPAREN ID COLON INT_TOKEN PIPE DOUBLE_TOKEN RPAREN ASSIGN INT_NUM EOL", True),
+    ("ALG: inline sjednoceni v val", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN EOL INDENT VAL ID COLON INT_TOKEN PIPE UNIT_TOKEN ASSIGN INT_NUM EOL DEDENT", True),
+    ("ALG: List[Int] | Unit v sjednoceni", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN EOL INDENT VAL ID COLON LIST_TOKEN LBRACK INT_TOKEN RBRACK PIPE UNIT_TOKEN ASSIGN INT_NUM EOL DEDENT", True),
+    ("ALG: alias v typove pozici", "IMPORT ID DOT MUL EOL TYPE ID ASSIGN INT_TOKEN EOL DEF ID LPAREN ID COLON ID RPAREN ASSIGN INT_NUM EOL", True),
+    ("ALG: alias v seznamu sjednoceni", "IMPORT ID DOT MUL EOL TYPE ID ASSIGN INT_TOKEN EOL TYPE ID ASSIGN ID PIPE UNIT_TOKEN EOL", True),
+    ("ALG: case class jmeno v typove pozici", "IMPORT ID DOT MUL EOL CASE CLASS ID LPAREN ID COLON INT_TOKEN RPAREN EOL DEF ID LPAREN ID COLON ID RPAREN ASSIGN INT_NUM EOL", True),
+    ("ALG: type bez = → chyba 2", "IMPORT ID DOT MUL EOL TYPE ID INT_TOKEN EOL", False),
+    ("ALG: type uvnitr funkce → chyba 2", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN EOL INDENT TYPE ID ASSIGN INT_TOKEN EOL DEDENT", False),
+    ("ALG: prazdne sjednoceni → chyba 2", "IMPORT ID DOT MUL EOL DEF ID LPAREN RPAREN ASSIGN EOL INDENT VAL ID COLON INT_TOKEN PIPE PIPE ASSIGN INT_NUM EOL DEDENT", False),
+    # Pattern satelit: pravidla jsou v P a tabulce (0 kolizí), ale nejsou
+    # dosažitelná z Program — testují se až v parseru přes parse_match_expr()
+    # ---- ALGEBDT match (§19.2) ----
+    ("ALG: match s jednou větví _", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match s literálovou větví", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match s id: typ větví", W.format("ID MATCH EOL INDENT CASE ID COLON INT_TOKEN FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match s konstruktorovou větví", W.format("ID MATCH EOL INDENT CASE ID LPAREN ID COMMA ID RPAREN FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match se stráží", W.format("ID MATCH EOL INDENT CASE ID COLON INT_TOKEN IF INT_NUM GT INT_NUM FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match s více větvemi", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW INT_NUM EOL CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match s prázdnými řádky mezi větvemi", W.format("ID MATCH EOL INDENT EOL CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match bez větví → chyba 2", W.format("ID MATCH EOL INDENT DEDENT"), False),
+    ("ALG: match bez INDENT → chyba 2", W.format("ID MATCH CASE UNDERSCORE FATARROW INT_NUM EOL"), False),
+    ("ALG: match neuzavřený → chyba 2", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL"), False),
+    ("ALG: val x = match", W.format("VAL ID ASSIGN ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: match jako výrazový příkaz od ID (StmtIdTail × MATCH)", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    # match validace větví (review kolo 3)
+    ("ALG: case bez FATARROW → chyba 2", W.format("ID MATCH EOL INDENT CASE UNDERSCORE INT_NUM EOL DEDENT"), False),
+    ("ALG: case bez těla → chyba 2", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW DEDENT"), False),
+    ("ALG: stráž bez výrazu → chyba 2", W.format("ID MATCH EOL INDENT CASE ID COLON INT_TOKEN IF FATARROW INT_NUM EOL DEDENT"), False),
+    ("ALG: val mezi větvemi → chyba 2", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL VAL ID ASSIGN INT_NUM EOL DEDENT"), False),
+    ("ALG: val mezi case a FATARROW → chyba 2", W.format("ID MATCH EOL INDENT CASE UNDERSCORE VAL ID ASSIGN INT_NUM FATARROW INT_NUM EOL DEDENT"), False),
+    ("ALG: (1) za DEDENT match = nový příkaz, OK", W.format("VAL ID ASSIGN ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT LPAREN INT_NUM RPAREN EOL"), True),
+    ("ALG: (1, 2) za DEDENT match → chyba 2 (čárka v výrazu)", W.format("VAL ID ASSIGN ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT LPAREN INT_NUM COMMA INT_NUM RPAREN EOL"), False),
+    # Prompt pro AI: „Muzes to upravit aby to sedelo konecne“ po review těl case.
+    ("ALG: EOL za šipkou bez odsazeného těla", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW EOL DEDENT"), False),
+    ("ALG: chybějící tělo před další větví", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW EOL CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), False),
+    ("ALG: neplatný příkaz v bloku větve", W.format("ID MATCH EOL INDENT CASE UNDERSCORE FATARROW EOL INDENT VAL ID ASSIGN EOL DEDENT DEDENT"), False),
+    ("ALG: dvě větve bez EOL mezi nimi", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW INT_NUM CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), False),
+    ("ALG: bloková větev před další větví", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW EOL INDENT VAL ID ASSIGN INT_NUM EOL ID EOL DEDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
+    ("ALG: vnořený match v těle před další větví", W.format("ID MATCH EOL INDENT CASE INT_NUM FATARROW ID MATCH EOL INDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT CASE UNDERSCORE FATARROW INT_NUM EOL DEDENT"), True),
 ]
 
 # ---------------------------- výstup ----------------------------

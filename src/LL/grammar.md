@@ -1,8 +1,8 @@
 # IFJ26 LL Gramatika
 
-Základní zadání s osmi rozšířeními: BOOLTHEN, PARAMLISTS, VALMEM, EXTKW,
+Základní zadání s devíti rozšířeními: BOOLTHEN, PARAMLISTS, VALMEM, EXTKW,
 FUNEXP, CONTROL, INTERPOLATEDS, LISTS. Všechna jsou zapracovaná, ověřená
-a zdokumentovaná v sekcích 13 až 18.
+a zdokumentovaná v sekcích 13 až 19.
 
 | rozšíření | co přidává | kde |
 |---|---|---|
@@ -14,10 +14,10 @@ a zdokumentovaná v sekcích 13 až 18.
 | CONTROL | jednořádková těla if, if-výraz, for s generátory a strážemi | §16 |
 | INTERPOLATEDS | interpolované řetězce `s"..."` a `s"""..."""` | §17 |
 | LISTS | seznamy `List[T]`, `++`, rozsahy jako výrazy, for přes seznam | §18 |
+| ALGEBDT | sjednocení a součinové typy, `match`, `case` a vzory | §19 |
 
-Verifikace: `ll_check.py` kontroluje LL bezkoliznost a tabulkovým
-parserem prochází 263 tokenových streamů (263/263, §9). Výrazy řeší
-precedenční tabulka, skript ověřuje jen strukturu příkazů.
+`ll_check.py` kontroluje kolize LL tabulky a 303 toků tokenů (§9).
+Skript ověřuje tvar výrazů, jejich seskupení určuje precedenční tabulka.
 
 ## 0. Konvence
 
@@ -30,7 +30,8 @@ precedenční tabulka, skript ověřuje jen strukturu příkazů.
   celé v kompetenci precedenční analýzy). LISTS: `LIST_TOKEN` scanner
   vydává přímo (klíčové slovo `List`, stejně jako `type` či `extension`),
   `LBRACK`/`RBRACK` jen v typovém argumentu `List[T]` (jinde v IFJ26
-  nevznikají).
+  nevznikají). ALGEBDT: `TYPE`, `CASE`, `CLASS`, `MATCH`
+  jsou klíčová slova, `FATARROW` = `=>`, `UNDERSCORE` = `_`.
   Pozor: `INT_TOKEN` = typ, `INT_NUM` = literál, dva různé tokeny.
   Před přepisem do C mechanicky srovnat přesné identifikátory z `token.h`
   (např. `INT_NUM_TOKEN`, `STRING_LITERAL_TOKEN`).
@@ -51,7 +52,9 @@ Prolog   → IMPORT ID DOT MUL EOL          (* v kódu: attr(ID)=="ifj26", jinak
 FuncDefs → EOL FuncDefs                   (* prázdné řádky po importu / mezi definicemi *)
          | FuncDef FuncDefs
          | ExtensionDef FuncDefs           (*  EXTKW *)
-         | ε                              (* Predikt: {EOL} | {DEF, AT} | {EXTENSION} | {EOF} *)
+         | TypeDef FuncDefs                (*  ALGEBDT *)
+         | CaseClassDef FuncDefs           (*  ALGEBDT *)
+         | ε                              (* Predikt: {EOL,DEF,AT,EXTENSION,TYPE,CASE} | {EOF} *)
 FuncDef  → DEF ID Params RetType ASSIGN Body
          | AT ID OptEol DEF ID Params RetType ASSIGN Body
                                         (* v kódu: attr(ID za AT)=="main" *)
@@ -59,6 +62,8 @@ OptEol   → EOL
          | ε                             (* Predikt: {EOL} | FOLLOW = {DEF} *)
 
 ExtensionDef → EXTENSION LPAREN Param RPAREN EOL INDENT ExtDefs DEDENT
+TypeDef      → TYPE ID ASSIGN Type EOL       (*  ALGEBDT: alias, jen vrchol *)
+CaseClassDef → CASE CLASS ID LPAREN ParamList RPAREN EOL (*  ALGEBDT: součinový typ *)
 ExtDefs      → EOL ExtDefs              (*  EXTKW: metody rozšíření; tvar = §5.9 PDF *)
              | FuncDef ExtDefs          (* @main uvnitř = sémantika, ne tvar *)
              | ε                         (* Predikt: {EOL, AT, DEF} | FOLLOW = {DEDENT} *)
@@ -92,9 +97,14 @@ AfterCommaParam → Param ParamRest               (* {ID}: další parametr *)
 Param           → ID COLON Type
 RetType         → COLON Type                    (* {COLON} *)
                 | ε                              (* FOLLOW = {ASSIGN} *)
-Type            → INT_TOKEN | DOUBLE_TOKEN | STRING_TOKEN | UNIT_TOKEN
+Type            → TypeAtom TypeUnionRest
+TypeAtom        → INT_TOKEN | DOUBLE_TOKEN | STRING_TOKEN | UNIT_TOKEN
                 | BOOLEAN_TOKEN                 (*  BOOLTHEN *)
                 | LIST_TOKEN LBRACK Type RBRACK (*  LISTS: List[T], vnořitelný *)
+                | ID                            (*  ALGEBDT: alias i case class
+                                               v typové pozici, symtable lookup *)
+TypeUnionRest   → PIPE TypeAtom TypeUnionRest  (*  ALGEBDT: T1 | T2 *)
+                | ε
 Body            → Rhs EOL                       (* jednořádkové tělo *)
                 | EOL INDENT Block DEDENT        (* blokové tělo *)
 ```
@@ -334,7 +344,7 @@ Původní řešení (pouze termy) platilo do FUNEXP, který ho nahradil.
 |---|---|---|---|
 | Program | `IMPORT` | – | ne |
 | Prolog | `IMPORT` | `AT DEF EOL EOF` | ne |
-| FuncDefs | `AT DEF EXTENSION EOL` | `EOF` | ano |
+| FuncDefs | `AT TYPE CASE DEF EXTENSION EOL` | `EOF` | ano |
 | ExtensionDef | `EXTENSION` | `AT DEF EXTENSION EOL EOF` | ne |
 | ExtDefs | `AT DEF EOL` | `DEDENT` | ano |
 | FuncDef | `AT DEF` | `AT DEF EOL EOF` | ne |
@@ -346,7 +356,17 @@ Původní řešení (pouze termy) platilo do FUNEXP, který ho nahradil.
 | AfterCommaParam | `ID` | `RPAREN` | ano |
 | Param | `ID` | `COMMA RPAREN` | ne |
 | RetType | `COLON` | `ASSIGN` | ano |
-| Type | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN BOOLEAN_TOKEN LIST_TOKEN` | `ASSIGN COMMA RPAREN RBRACK` | ne |
+| Type | FIRST(TypeAtom) | `ASSIGN COMMA RPAREN RBRACK EOL` | ne |
+| TypeAtom | `INT_TOKEN DOUBLE_TOKEN STRING_TOKEN UNIT_TOKEN BOOLEAN_TOKEN LIST_TOKEN ID` | `ASSIGN COMMA RPAREN RBRACK PIPE EOL` | ne |
+| TypeUnionRest | `PIPE` | `ASSIGN COMMA RPAREN RBRACK EOL` | **ano** |
+| TypeDef | `TYPE` | `AT DEF EXTENSION TYPE CASE EOL EOF` | ne |
+| Pattern | `INT_NUM DOUBLE_NUM STRING_LITERAL TRUE FALSE UNDERSCORE ID LPAREN MINUS` | – (satelit, §19) | ne |
+| PatTail | `COLON LPAREN` | `IF FATARROW EOL DEDENT` | ne |
+| PatNeg | `INT_NUM DOUBLE_NUM` | `COMMA RPAREN IF FATARROW` | ne |
+| PatArg | `ID INT_NUM DOUBLE_NUM STRING_LITERAL TRUE FALSE UNDERSCORE MINUS` | `COMMA RPAREN` | ne |
+| PatList | FIRST(PatArg) | `RPAREN` | **ano** |
+| PatRest | `COMMA` | `RPAREN` | **ano** |
+| CaseClassDef | `CASE` | `AT DEF EXTENSION TYPE CASE EOL EOF` | ne |
 | IfThen | `EOL` ∪ FIRST(Rhs) | stmt-starty, `DEDENT EOL` | ne |
 | IfTail | `ELSE` | stmt-starty, `DEDENT EOL` | ano |
 | IfElseOpt | `ELSE` ∪ `EOL SEMICOLON` | stmt-starty, `DEDENT EOL` | ne |
@@ -493,7 +513,7 @@ to deterministicky kontrolují (napiš soubor ll_check.py)."
 | Params / ParamList / ParamRest / AfterCommaParam | `parse_params` a další | ε-větev AfterCommaParam: check EOL-flagu |
 | Param | `parse_param` | |
 | RetType | `parse_ret_type` | |
-| Type | `parse_type` | switch přes 6 tokenů, List[T] rekurzivně |
+| Type / TypeAtom / TypeUnionRest | `parse_type` | atom + smyčka PIPE (sjednocení); ID = symtable lookup |
 | Body | `parse_body` | |
 | Block | `parse_block` | |
 | BlockItem | `parse_block_item` | kategorie: jednoduchý → SimpleStmt + LineEnd; složený → If/While/For |
@@ -505,6 +525,8 @@ to deterministicky kontrolují (napiš soubor ll_check.py)."
 | IfStmt / WhileStmt | `parse_if_stmt` / `parse_while_stmt` | |
 | IfThen / IfElseOpt / IfElse | `parse_if_then` / `parse_if_else` | jednořádek/blok/else-if řetěz |
 | ForStmt / ForHead / ForGen | `parse_for_stmt` / `parse_for_head` / `parse_for_gen` | zdroj = výrazová analýza (ForSrc) + validace tvaru rozsahu |
+| TypeDef / CaseClassDef | `parse_type_def` / `parse_case_class` | jen vrchol |
+| Pattern / PatArg | `parse_pattern` / `parse_pat_arg` | satelit volaný z match handleru |
 | DoBody / ForGuardRest | `parse_do_body` / `parse_guards` | |
 | ReturnStmt | `parse_return_stmt` | ε-větev `RhsOpt` = holý return |
 | RhsOpt | inline | |
@@ -705,4 +727,74 @@ DOT + ID jako u VALMEM. `filter`/`takeWhile`/`dropWhile` podmiňuje
 LAMBDAS, tvar `.metoda(výraz)` je legální už teď. `++` na ne-seznamu:
 tvar OK, sémantika 6. `readIntMaybe`/`readDoubleMaybe` patří k
 ALGEBDT (§5.5).
+
+
+## 19. Rozšíření ALGEBDT
+
+§5.5: sjednocení `T1 | T2`, aliasy `type`, součinové typy `case class`,
+výraz `match` s větvemi `case vzor [if stráž] => tělo`, vestavěné
+`readIntMaybe`/`readDoubleMaybe`. Čistě aditivní.
+
+- `Type → TypeAtom TypeUnionRest` — levá faktorizace pro sjednocení.
+  TypeAtom = 5 základních + `List[T]` + `ID` (alias i case class,
+  symtable lookup; nedefinovaný = sémantika, ne tvar).
+  TypeUnionRest = `PIPE TypeAtom TypeUnionRest | ε`, řetězitelné.
+- Sjednocení povoleno kdekoli, kde je `Type` (inline param, návratový
+  typ, `val x: Int | Unit`, alias). Alias může být členem dalšího
+  sjednocení (§5.5: „vč. dříve zadefinovaných sjednocení typů").
+- `TypeDef → TYPE ID ASSIGN Type EOL` — jen na vrcholu ( globální
+  rozsah).
+- `CaseClassDef → CASE CLASS ID LPAREN ParamList RPAREN EOL` — sdílí
+  ParamList s `def` (koncová čárka s EOL-flagem zdarma). Atributy
+  nemodifikovatelné veřejné. Tělo, metody, copy, dědičnost NE
+  ( §5.5 výslovně).
+- Match je výraz a postfix na operandu: `value match …`. Řeší ho kód,
+  ne pravidla (vzor break-form if-výrazu §16). Tělo větve = tentýž
+  tvar jako větev if-výrazu. Vyčerpávajícíost je sémantika
+  ( „postačí… vždy vyžaduje větev case _").
+- `(x match …) + 1` uvnitř závorek scanner neumí (EOL/INDENT/DEDENT
+  se uvnitř závorek nemitují), tento tvar není podporovaný.
+- `readIntMaybe`/`readDoubleMaybe`: návrat `Int | Unit` /
+  `Double | Unit`; chybný vstup → `()`.
+
+```ebnf
+Pattern    → INT_NUM | DOUBLE_NUM | STRING_LITERAL
+           | TRUE_TOKEN | FALSE_TOKEN
+           | UNDERSCORE                     (* _ *)
+           | LPAREN RPAREN                  (* () = Unit literál *)
+           | MINUS PatNeg                   (* záporný literál *)
+           | ID PatTail                     (* Point(x, y) nebo n: Int *)
+
+PatTail    → COLON TypeAtom                 (* n: Int *)
+           | LPAREN PatList RPAREN          (* Point(a, b) *)
+           (* BEZ ε — case x => = chyba 2, §5.5 nezahrnuje vazebný vzor *)
+
+PatNeg     → INT_NUM | DOUBLE_NUM
+
+PatList    → PatArg PatRest
+           | ε
+
+PatRest    → COMMA PatArg PatRest
+           | ε
+
+PatArg     → ID | INT_NUM | DOUBLE_NUM | STRING_LITERAL
+           | TRUE_TOKEN | FALSE_TOKEN | UNDERSCORE
+           | MINUS PatNeg
+           (* PLOCHÝ — žádná rekurze do Pattern *)
+```
+
+- `PatTail` bez ε: `case x =>` není podporovaný vzor ( §5.5).
+- `PatTail → COLON TypeAtom` (ne Type): vnořené typové vzory
+  (`case x: Int | Unit =>`) nejsou podporované ( §5.5).
+- PatArg plochý: vnořené konstruktory (`Point(Point(x))`) ne.
+- `()` jako Unit literál: `readIntMaybe` vrací `Int | Unit`,
+  `case () =>` je potřeba pro rozlišení chybného vstupu.
+- Záporné literály přes `MINUS PatNeg` (faktorizace MINUS × MINUS).
+
+Sémantika: hodnota `T1 | T2` = hodnota členského typu; přístup
+k operacím konkrétního členu až po rozlišení match-vzorem. Case class:
+`Point(2, 3)` = volání (FUNEXP), `point.x` = člen (VALMEM tvar).
+Codegen: match = kaskáda if shora dolů; součin = struktura v IFJcode26.
+`List[Int] | Unit` (LIST_TOKEN v TypeAtom), alias jako typ, case class
+jméno v typové pozici — vše zdarma od předchozích rozšíření.
 
