@@ -1,7 +1,10 @@
 /*
- * IFJ: AST
- * Soubor: ast.h
- * Autor: Pavel Novák [xnovakp01]
+ * IFJ26 Compiler Implementation
+ *
+ * File: ast.h
+ * Module: Generator
+ * Author: Pavel Novák (xnovakp01)
+ * Date: September 2026
  */
 
 
@@ -28,6 +31,7 @@ typedef enum{
 
   NODE_BINOP,
   NODE_UNOP,  //!
+  NODE_IDENT,
   NODE_LITERAL,
 
   //CONTROL EXTENSION
@@ -185,6 +189,12 @@ AST_NODE * ast_func_def_create(AST_NODE *body,  AST_NODE *params, AST_NODE *next
  *    body    params
  */
 
+AST_NODE * ast_ident_create(AST_NODE *left, char *name, AST_NODE *next);
+/*       identifikator ---next--->
+ *        /    \
+ *       /      \
+ *    literal
+ */
 
 
 AST_NODE * ast_call_create( AST_NODE *params, char *name, bool is_method, bool has_parens, AST_NODE *next);
@@ -270,4 +280,10 @@ AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
 
 
 void free_AST(AST_NODE *node);
+
+/* ladici vypis AST jako strom na stderr (ast.c) */
+void ast_print(const AST_NODE *root);
+
+/* vypise jen jeden uzel na jeden radek (ast.c) */
+void ast_print_node(const AST_NODE *node);
 

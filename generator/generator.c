@@ -1,7 +1,10 @@
 /*
-* IFJ: Generator
- * Soubor: generator.c
- * Autor: Pavel Novák [xnovakp01]
+ * IFJ26 Compiler Implementation
+ *
+ * File: generator.c
+ * Module: Generator
+ * Author: Pavel Novák (xnovakp01)
+ * Date: September 2026
  */
 
 #include "ast.h"
@@ -125,15 +128,22 @@ void cg_break(){}
 void cg_dprint(){}
 
 
+
+
+
+/*==========================================================
+ *       nova verze - snad spravna
+*===========================================================
+ */
+
 //writes definition of variables in function right after pushFrame
 void print_defvar(AST_NODE *node) {
   if (node->type==NODE_VAR_DEF) {
-    printf("LF@%s$%d\n", node->name,node->id);
+    printf("DEFVAR LF@%s$%d\n", node->name,node->id);
   }
 }
 void emit_defvars(Gen *gen, AST_NODE *node) {
   if (!node)return;
-
   if (node->left != NULL) {
     print_defvar(node->left);
     emit_defvars(gen,node->left);
@@ -142,142 +152,24 @@ void emit_defvars(Gen *gen, AST_NODE *node) {
     print_defvar(node->right);
     emit_defvars(gen,node->right);
   }
-  if (node->third) {
+  if (node->third != NULL) {
     print_defvar(node->third);
     emit_defvars(gen,node->third);
   }
-
-  emit_defvars(gen,node->next);
-}
-
-static void generator_recur(Gen *gen, AST_NODE *root);
-
-//pro napojovani funkci pres next
-void gen_list(Gen *gen, AST_NODE *node) {
-  while (node != NULL) {
-    generator_recur(gen,node);
-    node = node->next;
-  }
-}
-static void generator_recur(Gen *gen,AST_NODE *root) {
-  if (!root)return;
-  //TODO
-  //kazdy case si deti rozpracuje sam
-  switch (root->type) {
-    case NODE_NONE:
-      break;
-
-    case NODE_PROGRAM:
-      /*prolog
-      push frame
-       */
-      break;
-    case NODE_FUNC_DEF:
-      //counter for multiple while or if
-      int counter = 0;
-
-      printf("CREATEFRAME\n");
-      printf("PUSHFRAME\n");
-      //define variables
-      emit_defvars(gen,root);
-
-      //continue on the body of function
-      generator_recur(gen,root->left);
-      generator_recur(gen,root->right);
-
-      /*
-       *createFrame
-       pushFrame
-       * emit variables
-       * left
-       * right
-       * next
-       * popFrame
-       * a jestli tam je jeste neco na konec to nevim
-       */
-      break;
-
-    case NODE_PARAM:
-      /*
-       *tady budou definice parametru
-       *prace s docasnym ramcem
-
-       */
-      break;
-    case NODE_BLOCK:
-      //to netusim proc to tady je
-      break;
-
-    case NODE_VAR_DEF:
-      /*to je jasne
-       *left je kam se to zaradi
-       *rigt je hodnota
-       */
-
-      break;
-    case NODE_ASSIGN:
-      break;
-    case NODE_IF:
-      break;
-    case NODE_WHILE:
-      break;
-    case NODE_RETURN:
-      break;
-    case NODE_CALL:
-      break;
-    case NODE_EXPR_STMT:
-      break;
-
-    case NODE_BINOP:
-      break;
-    case NODE_UNOP:
-      break;
-    case NODE_LITERAL:
-      break;
-
-    case NODE_FOR:
-      break;
-    case NODE_RANGE:
-      break;
-
-    case NODE_INTERP:
-      break;
-    case print:
-      break;
-    case read_line:
-      break;
-    case read_int:
-      break;
-    case read_double:
-      break;
-    case to_str:
-      break;
-    case to_int:
-      break;
-    case str_length:
-      break;
-    case sub_str:
-      break;
-    case ord:
-      break;
-    case chr:
-      break;
-
-    default:
-      break;
+  if (node->next!=NULL) {
+    print_defvar(node->next);
+    emit_defvars(gen,node->next);
   }
 }
 
-/*==========================================================
- *       nova verze - snad spravna
-*===========================================================
- */
 
 int new_label(Gen *gen) {
   return gen->label_counter++;
 }
 
-
+/*
+ *special characters
+ */
 void emit_string_literal(Gen *gen, char *str) {
   printf("string@");
   for (char *c = str; *c; c++) {
@@ -298,7 +190,8 @@ void emit_string_literal(Gen *gen, char *str) {
         printf("\\092");
         break;
       default:
-        putchar(*c);
+        if (*c<32)printf("\\%03d", *c);
+        else putchar(*c);
     }
   }
 }
@@ -308,29 +201,39 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
 
-  printf("DEFVAR LF@tmp\n");
+
   /*        Program
  *          /  |  \
  *         /   |   \
- *      block
-  *     /  |  \
- *     /   |   \
- *   stmt
+ *      func
  */
 
-  //if block is null -> nothing to do
-  if (!fn->left)return;
 
-  for (AST_NODE *node = fn->left->left; node != NULL; node = node->next) {
+  //print all variables
+  emit_defvars(gen, fn);
+
+  //mezi promenne cz
+  printf("DEFVAR LF@tmp1\n");
+  printf("DEFVAR LF@tmp2\n");
+  printf("DEFVAR LF@tmp3\n");
+
+  for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
     gen_stmt(gen,node);
   }
+
+
+  //return
   printf("PUSHS nil@nil\n");
+
   printf("POPFRAME\n");
   printf("RETURN\n");
 }
 
 
 void generator_init(Gen *gen, AST_NODE *root) {
+  //==================
+  //ast_print(root);
+  //====================*/
   printf(".IFJcode26\n");
 
   //finding main function

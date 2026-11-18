@@ -1,9 +1,11 @@
 /*
-* IFJ: Generator
- * Soubor: gen_builtins.c
- * Autor: Pavel Novák [xnovakp01]
+ * IFJ26 Compiler Implementation
+ *
+ * File: gen_builtins.c
+ * Module: Generator
+ * Author: Pavel Novák (xnovakp01)
+ * Date: September 2026
  */
-
 
 #include "ast.h"
 

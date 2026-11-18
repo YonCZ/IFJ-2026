@@ -1,7 +1,10 @@
 /*
-* IFJ: Generator
- * Soubor: generator.h
- * Autor: Pavel Novák [xnovakp01]
+ * IFJ26 Compiler Implementation
+ *
+ * File: generator.c
+ * Module: Generator
+ * Author: Pavel Novák (xnovakp01)
+ * Date: September 2026
  */
 
 
