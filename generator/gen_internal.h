@@ -13,6 +13,7 @@
 typedef struct {
   int label_counter;
   char *function_name;
+  DATA_TYPE return_type;
 }Gen;
 
 

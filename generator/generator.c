@@ -196,7 +196,17 @@ void emit_string_literal(Gen *gen, char *str) {
   }
 }
 
+static void process_params(AST_NODE *node) {
+  if (node) {
+    printf("DEFVAR LF@%s$%d\n", node->name,node->id);
+    process_params(node->next);
+    printf("POPS LF@%s$%d\n", node->name, node->id);
+  }
+
+}
+
 void gen_function(Gen *gen, AST_NODE *fn) {
+  gen->return_type = fn->data_type;
   printf("LABEL $f_%s\n", fn->name);
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
@@ -212,18 +222,36 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   //print all variables
   emit_defvars(gen, fn);
 
+  //parametry - muze jich byt nekonecno? rekurzivni funkce vyrvarejici LF@tmp
+  //=============================
+
   //mezi promenne cz
   printf("DEFVAR LF@tmp1\n");
   printf("DEFVAR LF@tmp2\n");
   printf("DEFVAR LF@tmp3\n");
 
+  process_params(fn->third);
+
+
+  //processing block of code
+  //TODO zkontrolovat jestli tady bude moct byt left - je to uz druhe left (1. je v program init)
+  //TODO znamenalo by to program -> body -> function ale to prece nenamem
+  //gen_block(gen, fn->left);
+
   for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
-    gen_stmt(gen,node);
+    if (node->next==NULL && node->type == NODE_EXPR_STMT && fn->data_type != DATA_UNIT) {
+      gen_expr(gen, node->left);
+    }
+    else {
+      gen_stmt(gen, node);
+    }
   }
 
-
   //return
-  printf("PUSHS nil@nil\n");
+  //TODO bud neco nebo se vraci unit a to je asi nil?
+
+  if (fn->data_type == DATA_UNIT) printf("PUSHS nil@nil\n");
+
 
   printf("POPFRAME\n");
   printf("RETURN\n");

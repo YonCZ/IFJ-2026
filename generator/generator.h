@@ -30,4 +30,6 @@ void gen_stmt(Gen *gen, AST_NODE *node);
 //expresions
 void gen_expr(Gen *gen, AST_NODE *node);
 
+void gen_block(Gen *gen, AST_NODE *node);
+
 #endif

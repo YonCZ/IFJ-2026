@@ -67,6 +67,14 @@ void gen_expr(Gen *gen, AST_NODE *node) {
           printf("POPS LF@tmp1\n");
           printf("WRITE LF@tmp1\n");
         }
+        //only expresion which doesnt return value
+        printf("PUSHS nil@nil\n");
+      }
+      else {
+        for (AST_NODE *param = node->third; param != NULL; param = param->next) {
+          gen_expr(gen, param);
+        }
+        printf("CALL $f_%s\n",node->name);
       }
       break;
 

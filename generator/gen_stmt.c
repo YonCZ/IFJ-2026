@@ -19,6 +19,7 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
   switch (node->type) {
     case NODE_EXPR_STMT:
       gen_expr(gen, node->left);
+      printf("POPS LF@tmp1\n");
       break;
 
     case NODE_VAR_DEF:
@@ -32,11 +33,61 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
       pop_to_val(node->left);
       break;
 
+    case NODE_IF: {
+      int if_id= new_label(gen);
+
+      //condition
+      gen_expr(gen, node->left);
+      printf("PUSHS bool@false\n");
+      printf("JUMPIFEQS IF$%d$ELSE\n",if_id);
+
+
+      //then
+      gen_block(gen, node->right);
+      printf("JUMP IF$%d$END\n",if_id);
+
+      //else
+      printf("LABEL IF$%d$ELSE\n",if_id);
+      gen_block(gen, node->third);
+
+      //end
+      printf("LABEL IF$%d$END\n",if_id);
+      break;
+    }
+      case NODE_WHILE:{
+      int while_id = new_label(gen);
+      printf("LABEL WHILE$%d\n",while_id);
+
+      gen_expr(gen, node->left);
+      printf("PUSHS bool@false\n");
+      printf("JUMPIFEQS WHILE$%d$END\n",while_id);
+
+      gen_block(gen, node->right);
+      printf("JUMP WHILE$%d\n",while_id);
+
+      printf("LABEL WHILE$%d$END\n",while_id);
+      break;
+    }
+
+    case NODE_RETURN:
+      if (!node->left) {
+        printf("PUSHS nil@nil\n");
+        printf("POPFRAME\n");
+        printf("RETURN\n");
+      }
+      else{
+        gen_expr(gen, node->left);
+        printf("POPFRAME\n");
+        printf("RETURN\n");
+      }
+      break;
     default:
       break;
   }
 }
 
-void gen_block(Gen *gen, AST_NODE *node) {
-
+void gen_block(Gen *gen, AST_NODE *fn) {
+  for (AST_NODE *node = fn; node != NULL; node = node->next) {
+    gen_stmt(gen,node);
+  }
 }

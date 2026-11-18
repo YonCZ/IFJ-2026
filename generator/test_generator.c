@@ -1,7 +1,8 @@
 /*
  * Projekt: IFJ26 – překladač jazyka IFJ26 do IFJcode26
  * Soubor:  test_generator.c – test generátoru kódu (fáze 0: kostra, 1: konstanty a print,
- *                            2: výrazy, 3: proměnné)
+ *                            2: výrazy, 3: proměnné, 4: if a while, 5: funkce,
+ *                            6: vestavěné funkce)
  *
  * ---------------------------------------------------------------------------
  * Tento soubor vygenerovala AI: Claude Sonnet 5.5 (Anthropic, claude-sonnet-5-5), 2026-11-17.
@@ -11,6 +12,9 @@
  * Prompt 2: "vytvoř mi test na fázi 1" (konstanty a print: Int, Double, String, Boolean, ())
  * Prompt 3: "udelej testy pro fazi 3" (proměnné: val, var, přiřazení, použití proměnné)
  * Prompt 4: "vytvor test pro fazi 2" (výrazy: + - * /, řetězce, porovnání, Int a Double)
+ * Prompt 5: "udelej test na fazi 4" (if, else if, else, while a jejich kombinace)
+ * Prompt 6: "delej test pro fazi 5" (funkce: volání, parametry, return, rekurze)
+ * Prompt 7: "chci abys mi builtins udelal tz" (fáze 6: vestavěné funkce, vstup, běhové chyby)
  * Zadal a zrevidoval: Pavel Novák (xnovakp01)
  * ---------------------------------------------------------------------------
  *
@@ -18,7 +22,7 @@
  *   Postaví ručně malý AST (bez parseru a sémantiky), zavolá generator_init(), zkontroluje
  *   tvar vygenerovaného IFJcode26 a pak spočítá, co by program vypsal, a porovná to s tím,
  *   co vypsat má. Výpis počítá malý simulátor přímo v tomto souboru (umí instrukce, které
- *   fáze 0 až 3 potřebují), takže test funguje i bez interpretu ic26int. Pokud ic26int najde
+ *   fáze 0 až 6 potřebují), takže test funguje i bez interpretu ic26int. Pokud ic26int najde
  *   a jde spustit, pustí v něm kód ještě jednou a porovná výstup také.
  *   Každý případ běží ve vlastním procesu, takže pád generátoru shodí jen ten jeden případ.
  *
@@ -28,8 +32,8 @@
  *         -o test_generator && ./test_generator
  *
  * POUŽITÍ
- *     ./test_generator              všechny případy (fáze 0 až 3)
- *     ./test_generator f2           jen fáze 2 (f0, f1, f3 = jen ta fáze)
+ *     ./test_generator              všechny případy (fáze 0 až 6)
+ *     ./test_generator f6           jen fáze 6 (f0 až f5 = jen ta fáze)
  *     ./test_generator f1_string    jen případ s tímto jménem
  *     ./test_generator -v           vypíše vygenerovaný kód i u případů, které prošly
  *     INTERP=cesta/k/ic26int ./test_generator
@@ -70,6 +74,57 @@
  *     ale generátoru je to jedno: výraz vždy nechá jednu hodnotu na zásobníku)
  *   - unární mínus: UNOP s OP_SUB (0 - x). Konvence AST pro unární mínus není ve specifikaci;
  *     pokud ji máte jinak, případy f2_neg a f2_neg_double smaž nebo uprav (funkce neg())
+ *   Fáze 4 (if a while): tvar uzlů je podle parseru (parse_if_then, parse_while_stmt, parse_block):
+ *   IF: left = podmínka, right = větev then, third = větev else (NULL, když chybí), WHILE: left =
+ *   podmínka, right = tělo. Větev i tělo jsou řetěz příkazů přes next. U "else if" je third rovnou
+ *   jeden uzel NODE_IF (bez řetězu). Jednořádkový zápis (if c then a else b, kde větve jsou holé
+ *   výrazy) tenhle test nezkouší.
+ *   - podmínka se vyhodnotí na zásobník a skok si hodnotu vezme: PUSHS bool@false + JUMPIFEQS
+ *     (simulátor umí JUMPIFEQS, JUMPIFNEQS a taky JUMPIFEQ a JUMPIFNEQ s operandy). Po skoku
+ *     nesmí na zásobníku nic zůstat, kontrola na konci programu hlídá i smyčku (kdyby v každém
+ *     průchodu něco zůstalo, na konci by na zásobníku byla hromada hodnot)
+ *   - každé if a každé while má vlastní návěští a žádné se v celém programu neopakuje, ani mezi
+ *     funkcemi (číslo z new_label je jedno počítadlo pro celý program, to stačí)
+ *   - každý skok míří na existující návěští, i tam, kam se za běhu nedojde
+ *   - DEFVAR proměnných deklarovaných uvnitř větví a těl cyklů je na začátku funkce (v cyklu by se
+ *     provedl podruhé a interpret by skončil chybou 52). Vnitřní návěští (if, while) test nepočítá
+ *     za začátek další funkce: funkce se pozná podle LABEL, za kterým je hned CREATEFRAME
+ *   Fáze 5 (funkce): tvar uzlů je podle komentářů v ast.h (parser výrazy a volání zatím jen přeskakuje,
+ *   takže jejich tvar z něj není vidět):
+ *   FUNC_DEF: left = tělo (řetěz příkazů přes next), third = parametry (řetěz NODE_PARAM se jménem,
+ *   typem a číslem id), data_type = návratový typ. CALL: name, argumenty ve third (řetěz přes next,
+ *   zleva doprava), data_type = typ výsledku. Volání jako příkaz: NODE_EXPR_STMT s voláním v left.
+ *   RETURN: left = výraz, NULL u prázdného return. Návratová hodnota bez return: poslední příkaz těla
+ *   je NODE_EXPR_STMT s výrazem (konvence je ve funkci flast(), uprav ji tam, jestli to máte jinak).
+ *   - volající vyhodnotí argumenty zleva doprava (gen_expr na každý), potom CALL $f_jmeno; výsledek
+ *     zůstane na zásobníku (výraz nechá jednu hodnotu). Volání jako příkaz výsledek zahodí (POPS)
+ *   - volaná funkce: DEFVAR parametrů a lokálních proměnných na začátku, potom POPS parametrů od
+ *     posledního k prvnímu (poslední argument je navrchu). Jméno parametru je jmeno$id jako u proměnné
+ *   - výsledek funkce je vždy jedna hodnota na zásobníku: u Unit nil@nil, jinak hodnota z return nebo
+ *     poslední výraz těla. return uprostřed funkce (i v if nebo while) musí taky nechat jednu hodnotu
+ *     a hned POPFRAME a RETURN. Prázdný return vrací nil@nil
+ *   - proměnné volaného a volajícího se nemíchají (každá funkce má vlastní rámec), rekurze má v každém
+ *     volání vlastní hodnoty
+ *   Fáze 6 (vestavěné funkce): uzel NODE_CALL se jménem funkce (readInt, readDouble, readLine, toStr,
+ *   toInt, strLength, subStr, ord, chr), argumenty ve third (řetěz přes next), data_type = typ výsledku.
+ *   Typ argumentu toStr je v data_type argumentu (Int, Double nebo String). V základním zadání
+ *   smí být volání jen jako příkaz nebo vpravo od val, var a =; případy *_nested používají volání
+ *   uvnitř jiného volání (rozšíření FUNEXP) a generátor je zvládne sám od sebe: výraz nechá jednu
+ *   hodnotu na zásobníku. Test je černá skříňka: neřeší, jak vestavěné funkce vypadají v kódu
+ *   (volání $b_... jako u uživatelských funkcí, nebo rozepsané přímo), kontroluje jen to, co program
+ *   vypíše a s jakým kódem skončí:
+ *   - print vypisuje bez nového řádku, Double hexadecimálně (%a), toStr(Double) vždy jako %.2f
+ *   - readInt a readDouble vrací 0, když je řádek chybný nebo je konec vstupu (instrukce READ
+ *     v těch případech vrací nil, generátor ho musí převést); okolní bílé znaky se neignorují
+ *   - readLine vrací řádek včetně znaku nového řádku, na konci vstupu prázdný řetězec
+ *   - subStr(s, start, end) skončí kódem 40, když start < 0, end < 0, start > end, start >= délka
+ *     nebo end > délka; ord vrací -1 pro index mimo řetězec nebo prázdný řetězec; chr(code) mimo
+ *     0 až 127 skončí chybou interpretu 58; celočíselné dělení nulou skončí kódem 57
+ *   - vestavěná funkce se v kódu nesmí definovat víckrát (stejné pravidlo jako u LABEL funkcí) a
+ *     její definice jsou až za EXIT; vynechání výsledku volání (volání jako příkaz) nic nezanechá
+ *   - na rozdíl od fází 0 až 4 se v téhle fázi nekontroluje, že před POPFRAME je PUSHS nil@nil (funkce
+ *     s hodnotou ho mít nesmí), a CALL na jiné funkce než @main je povolený. POPS parametrů hned za
+ *     DEFVAR na začátku funkce se nepočítá jako tělo (DEFVAR za ním je pořád v pořádku)
  *
  * KDE UPRAVIT, KDYŽ SE ZMĚNÍ ROZHRANÍ
  *   make_program() – jak se skládá NODE_PROGRAM (teď: left = první funkce, další přes next)
@@ -78,6 +133,10 @@
  *   use(), vdef(), assign() – jak se v AST staví proměnná, deklarace a přiřazení (teď: NODE_IDENT
  *                    se jménem a číslem id, NODE_VAR_DEF s hodnotou v left, NODE_ASSIGN: left =
  *                    proměnná, right = výraz). Jméno proměnné v kódu je jmeno$id, např. LF@x$1
+ *   fdef(), par(), fcall(), fcall_stmt(), fret(), flast() – jak se staví funkce, parametr, volání,
+ *                    volání jako příkaz, return a poslední výraz těla (fáze 5)
+ *   if_stmt(), while_stmt() – jak se staví if a while (ast_if_create: cond, then, else, next;
+ *                    ast_while_create: cond, body, next)
  *   print_stmt()   – jak vypadá print (teď: NODE_EXPR_STMT → NODE_CALL "print" → argument
  *                    v third)
  *   run_generator() – jak se volá generátor (teď: Gen gen = {0}; generator_init(&gen, root))
@@ -88,6 +147,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #include <ctype.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -95,6 +155,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <math.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -180,6 +242,18 @@ static AST_NODE *lit_i(long long v) { return ast_int_literal_create(v, NULL); }
 static AST_NODE *lit_d(double v) { return ast_double_literal_create(v, NULL); }
 static AST_NODE *lit_b(bool v) { return ast_bool_literal_create(v, NULL); }
 static AST_NODE *lit_u(void) { return ast_unit_literal_create(NULL); }
+
+/* if cond then <then> else <els>; další příkaz přes next. Podle parseru je podmínka v left, větev
+ * then v right a větev else ve third. Větev je řetěz příkazů přes next (parse_block); u "else if"
+ * je third rovnou uzel NODE_IF; když else chybí, je third NULL. */
+static AST_NODE *if_stmt(AST_NODE *cond, AST_NODE *then, AST_NODE *els, AST_NODE *next) {
+  return ast_if_create(cond, then, els, next);
+}
+
+/* while cond do <body>: podmínka v left, tělo (řetěz příkazů) v right */
+static AST_NODE *while_stmt(AST_NODE *cond, AST_NODE *body, AST_NODE *next) {
+  return ast_while_create(cond, body, next);
+}
 
 /* ------------------------------------------------------------------------- */
 /*  Případy                                                                  */
@@ -447,6 +521,889 @@ static AST_NODE *build_f2_mixed_cmp(void) { /* 2 < 2.5; 2.5 > 2; 2 == 2.0 */
 #undef S
 #undef B
 
+/* fáze 4: if / else if / else a while. Typy uzlů a čísla proměnných jako by je zapsala sémantika. */
+#define I DATA_INT
+#define D DATA_DOUBLE
+#define S DATA_STRING
+#define B DATA_BOOL
+#define PS(str, nx) print_stmt(lit_s(str), (nx))
+#define UI(name, id) use((name), (id), I)
+
+/* i = i + 1 (jméno a číslo proměnné se zadá) */
+static AST_NODE *inc(const char *name, int id, AST_NODE *next) {
+  return assign(use(name, id, I), add_int(use(name, id, I), lit_i(1)), next);
+}
+
+static AST_NODE *build_f4_if_true(void) {
+  return main_prints(if_stmt(lit_b(true), PS("A", NULL), NULL, NULL));
+}
+static AST_NODE *build_f4_if_false(void) { /* větev se přeskočí, za ifem se pokračuje */
+  return main_prints(if_stmt(lit_b(false), PS("A", NULL), NULL, PS("Z", NULL)));
+}
+static AST_NODE *build_f4_if_else_true(void) {
+  return main_prints(if_stmt(lit_b(true), PS("A", NULL), PS("B", NULL), NULL));
+}
+static AST_NODE *build_f4_if_else_false(void) {
+  return main_prints(if_stmt(lit_b(false), PS("A", NULL), PS("B", NULL), NULL));
+}
+static AST_NODE *build_f4_if_cmp(void) { /* podmínka je porovnání, před ifem a za ním je příkaz */
+  return main_prints(PS("<", if_stmt(bin(OP_LT, lit_i(1), lit_i(2), B), PS("A", NULL),
+                                     PS("B", NULL), PS(">", NULL))));
+}
+static AST_NODE *build_f4_if_cmp_else(void) {
+  return main_prints(PS("<", if_stmt(bin(OP_LT, lit_i(2), lit_i(1), B), PS("A", NULL),
+                                     PS("B", NULL), PS(">", NULL))));
+}
+static AST_NODE *build_f4_if_multi(void) { /* ve větvích je víc příkazů za sebou (řetěz přes next) */
+  return main_prints(if_stmt(lit_b(true), print_stmt(lit_i(1), print_stmt(lit_i(2), NULL)),
+                             print_stmt(lit_i(3), print_stmt(lit_i(4), NULL)), NULL));
+}
+static AST_NODE *build_f4_if_multi_else(void) {
+  return main_prints(if_stmt(lit_b(false), print_stmt(lit_i(1), print_stmt(lit_i(2), NULL)),
+                             print_stmt(lit_i(3), print_stmt(lit_i(4), NULL)), NULL));
+}
+static AST_NODE *build_f4_if_two_ifs(void) { /* dvě if za sebou: návěští se nesmí opakovat */
+  return main_prints(if_stmt(lit_b(true), PS("A", NULL), PS("B", NULL),
+                             if_stmt(lit_b(false), PS("C", NULL), PS("D", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_three(void) { /* tři if bez else za sebou */
+  return main_prints(if_stmt(
+      lit_b(true), PS("A", NULL), NULL,
+      if_stmt(lit_b(true), PS("B", NULL), NULL, if_stmt(lit_b(false), PS("C", NULL), NULL, NULL))));
+}
+static AST_NODE *build_f4_if_nested(void) { /* if v then větvi */
+  return main_prints(if_stmt(lit_b(true), if_stmt(lit_b(false), PS("X", NULL), PS("Y", NULL), NULL),
+                             PS("Z", NULL), NULL));
+}
+static AST_NODE *build_f4_if_nested_else(void) { /* if v else větvi, za ním další příkaz ve větvi */
+  return main_prints(if_stmt(
+      lit_b(false), PS("X", NULL),
+      if_stmt(lit_b(true), PS("Y", NULL), PS("Z", NULL), PS("!", NULL)), NULL));
+}
+static AST_NODE *build_f4_if_nested_deep(void) { /* tři if do sebe, za vnějším další příkaz */
+  return main_prints(if_stmt(
+      lit_b(true),
+      if_stmt(lit_b(true), if_stmt(lit_b(true), PS("A", NULL), NULL, NULL), NULL, NULL), NULL,
+      PS("B", NULL)));
+}
+static AST_NODE *build_f4_if_nested_both(void) { /* if jak v then, tak v else větvi */
+  return main_prints(if_stmt(lit_b(true),
+                             if_stmt(lit_b(true), PS("A", NULL), PS("B", NULL), NULL),
+                             if_stmt(lit_b(true), PS("C", NULL), PS("D", NULL), NULL), NULL));
+}
+static AST_NODE *build_f4_else_if(void) { /* if false A else if true B else C */
+  return main_prints(if_stmt(lit_b(false), PS("A", NULL),
+                             if_stmt(lit_b(true), PS("B", NULL), PS("C", NULL), NULL), NULL));
+}
+static AST_NODE *build_f4_else_if_last(void) { /* dojde se až na poslední else */
+  return main_prints(if_stmt(lit_b(false), PS("A", NULL),
+                             if_stmt(lit_b(false), PS("B", NULL), PS("C", NULL), NULL), NULL));
+}
+static AST_NODE *build_f4_else_if_first(void) { /* splněná první podmínka, else if se přeskočí */
+  return main_prints(if_stmt(lit_b(true), PS("A", NULL),
+                             if_stmt(lit_b(true), PS("B", NULL), PS("C", NULL), NULL), NULL));
+}
+static AST_NODE *build_f4_else_if_chain(void) { /* var x = 2; x == 1 / x == 2 / x == 3 / else */
+  return main_prints(vdef(
+      "x", 1, false, I, lit_i(2),
+      if_stmt(bin(OP_EQ, UI("x", 1), lit_i(1), B), PS("A", NULL),
+              if_stmt(bin(OP_EQ, UI("x", 1), lit_i(2), B), PS("B", NULL),
+                      if_stmt(bin(OP_EQ, UI("x", 1), lit_i(3), B), PS("C", NULL), PS("D", NULL),
+                              NULL),
+                      NULL),
+              NULL)));
+}
+static AST_NODE *build_f4_else_if_no_else(void) { /* else if bez posledního else, nic neplatí */
+  return main_prints(if_stmt(lit_b(false), PS("A", NULL),
+                             if_stmt(lit_b(false), PS("B", NULL), NULL, NULL), PS("Z", NULL)));
+}
+static AST_NODE *if_var_prog(long long v) { /* var x = v; if x > 3 { big } else { small } */
+  return main_prints(vdef("x", 1, false, I, lit_i(v),
+                          if_stmt(bin(OP_GT, UI("x", 1), lit_i(3), B), PS("big", NULL),
+                                  PS("small", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_var(void) { return if_var_prog(5); }
+static AST_NODE *build_f4_if_var_else(void) { return if_var_prog(1); }
+static AST_NODE *build_f4_if_assign(void) { /* var x = 1; if true { x = 2 }; print(x) */
+  return main_prints(vdef("x", 1, false, I, lit_i(1),
+                          if_stmt(lit_b(true), assign(UI("x", 1), lit_i(2), NULL), NULL,
+                                  print_stmt(UI("x", 1), NULL))));
+}
+static AST_NODE *build_f4_if_assign_skip(void) { /* větev se nevykoná, x zůstane 1 */
+  return main_prints(vdef("x", 1, false, I, lit_i(1),
+                          if_stmt(lit_b(false), assign(UI("x", 1), lit_i(3), NULL), NULL,
+                                  print_stmt(UI("x", 1), NULL))));
+}
+static AST_NODE *build_f4_if_assign_else(void) { /* if 2 < 1 { x = 1 } else { x = 2 } */
+  return main_prints(vdef("x", 1, false, I, lit_i(0),
+                          if_stmt(bin(OP_LT, lit_i(2), lit_i(1), B), assign(UI("x", 1), lit_i(1), NULL),
+                                  assign(UI("x", 1), lit_i(2), NULL), print_stmt(UI("x", 1), NULL))));
+}
+static AST_NODE *build_f4_if_var_in_branch(void) { /* proměnné deklarované uvnitř větví */
+  return main_prints(if_stmt(
+      lit_b(true), vdef("y", 1, true, I, lit_i(4), print_stmt(UI("y", 1), NULL)),
+      vdef("z", 2, true, I, lit_i(5), print_stmt(UI("z", 2), NULL)), NULL));
+}
+static AST_NODE *build_f4_if_cond_expr(void) { /* (1 + 2) == 3 a 2 * 3 > 7 */
+  return main_prints(if_stmt(
+      bin(OP_EQ, bin(OP_ADD, lit_i(1), lit_i(2), I), lit_i(3), B), PS("A", NULL), PS("B", NULL),
+      if_stmt(bin(OP_GT, bin(OP_MUL, lit_i(2), lit_i(3), I), lit_i(7), B), PS("C", NULL),
+              PS("D", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_bool_var(void) { /* val b = true; if b */
+  return main_prints(vdef("b", 1, true, B, lit_b(true),
+                          if_stmt(use("b", 1, B), PS("A", NULL), PS("B", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_bool_var_cmp(void) { /* val b = 1 < 0; if b */
+  return main_prints(vdef("b", 1, true, B, bin(OP_LT, lit_i(1), lit_i(0), B),
+                          if_stmt(use("b", 1, B), PS("A", NULL), PS("B", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_cmp_ops(void) { /* <=, >=, != v podmínce */
+  return main_prints(if_stmt(
+      bin(OP_LE, lit_i(2), lit_i(2), B), PS("A", NULL), PS("B", NULL),
+      if_stmt(bin(OP_GE, lit_i(3), lit_i(4), B), PS("C", NULL), PS("D", NULL),
+              if_stmt(bin(OP_NEQ, lit_i(1), lit_i(1), B), PS("E", NULL), PS("F", NULL), NULL))));
+}
+static AST_NODE *build_f4_if_string_cmp(void) {
+  return main_prints(if_stmt(
+      bin(OP_LT, lit_s("a"), lit_s("b"), B), PS("A", NULL), PS("B", NULL),
+      if_stmt(bin(OP_EQ, lit_s("ab"), lit_s("ac"), B), PS("C", NULL), PS("D", NULL), NULL)));
+}
+static AST_NODE *build_f4_if_mixed(void) { /* 2 < 2.5: Int a Double v podmínce (INT2FLOATS) */
+  return main_prints(if_stmt(bin(OP_LT, lit_i(2), lit_d(2.5), B), PS("A", NULL), PS("B", NULL), NULL));
+}
+static AST_NODE *build_f4_if_two_functions(void) { /* if i ve druhé funkci: návěští se nesmí shodovat */
+  return make_program(
+      func("main", true, if_stmt(lit_b(true), PS("x", NULL), NULL, NULL),
+           func("helper", false, if_stmt(lit_b(true), PS("y", NULL), PS("z", NULL), NULL), NULL)));
+}
+static AST_NODE *build_f4_if_helper_var(void) { /* proměnná ve větvi ve druhé funkci (vlastní DEFVAR) */
+  return make_program(
+      func("main", true, PS("x", NULL),
+           func("helper", false,
+                vdef("h", 1, false, I, lit_i(1),
+                     if_stmt(bin(OP_EQ, UI("h", 1), lit_i(1), B),
+                             vdef("k", 2, true, I, lit_i(2), print_stmt(UI("k", 2), NULL)),
+                             print_stmt(lit_i(0), NULL), NULL)),
+                NULL)));
+}
+
+static AST_NODE *build_f4_while_count(void) { /* var i = 1; while i < 4 { print(i); i = i + 1 } */
+  return main_prints(vdef("i", 1, false, I, lit_i(1),
+                          while_stmt(bin(OP_LT, UI("i", 1), lit_i(4), B),
+                                     print_stmt(UI("i", 1), inc("i", 1, NULL)), NULL)));
+}
+static AST_NODE *build_f4_while_zero(void) { /* tělo se nevykoná ani jednou */
+  return main_prints(while_stmt(lit_b(false), PS("X", NULL), PS("ok", NULL)));
+}
+static AST_NODE *build_f4_while_1_10(void) { /* čísla 1 až 10 */
+  return main_prints(vdef("i", 1, false, I, lit_i(1),
+                          while_stmt(bin(OP_LE, UI("i", 1), lit_i(10), B),
+                                     print_stmt(UI("i", 1), inc("i", 1, NULL)), NULL)));
+}
+static AST_NODE *build_f4_while_sum(void) { /* s = 1 + 2 + 3 + 4 + 5 */
+  return main_prints(vdef(
+      "s", 1, false, I, lit_i(0),
+      vdef("i", 2, false, I, lit_i(1),
+           while_stmt(bin(OP_LE, UI("i", 2), lit_i(5), B),
+                      assign(UI("s", 1), add_int(UI("s", 1), UI("i", 2)), inc("i", 2, NULL)),
+                      print_stmt(UI("s", 1), NULL)))));
+}
+static AST_NODE *build_f4_while_countdown(void) { /* n = 3, 2, 1 */
+  return main_prints(vdef(
+      "n", 1, false, I, lit_i(3),
+      while_stmt(bin(OP_GT, UI("n", 1), lit_i(0), B),
+                 print_stmt(UI("n", 1),
+                            assign(UI("n", 1), bin(OP_SUB, UI("n", 1), lit_i(1), I), NULL)),
+                 NULL)));
+}
+static AST_NODE *build_f4_while_neq(void) { /* while i != 3 */
+  return main_prints(vdef("i", 1, false, I, lit_i(0),
+                          while_stmt(bin(OP_NEQ, UI("i", 1), lit_i(3), B), inc("i", 1, NULL),
+                                     print_stmt(UI("i", 1), NULL))));
+}
+static AST_NODE *build_f4_while_cond_expr(void) { /* while i * i < 20: i skončí na 5 */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(1),
+      while_stmt(bin(OP_LT, bin(OP_MUL, UI("i", 1), UI("i", 1), I), lit_i(20), B), inc("i", 1, NULL),
+                 print_stmt(UI("i", 1), NULL))));
+}
+static AST_NODE *build_f4_while_nested(void) { /* i = 1..2, j = 1..2, print(i * 10 + j) */
+  AST_NODE *val = bin(OP_ADD, bin(OP_MUL, UI("i", 1), lit_i(10), I), UI("j", 2), I);
+  AST_NODE *inner = while_stmt(bin(OP_LE, UI("j", 2), lit_i(2), B),
+                               print_stmt(val, inc("j", 2, NULL)), inc("i", 1, NULL));
+  AST_NODE *outer = while_stmt(bin(OP_LE, UI("i", 1), lit_i(2), B),
+                               assign(UI("j", 2), lit_i(1), inner), NULL);
+  return main_prints(vdef("i", 1, false, I, lit_i(1), vdef("j", 2, false, I, lit_i(1), outer)));
+}
+static AST_NODE *build_f4_while_if(void) { /* if v těle cyklu: vypíše jen sudá čísla 2 4 6 */
+  AST_NODE *even = bin(OP_EQ, bin(OP_MUL, bin(OP_DIV, UI("i", 1), lit_i(2), I), lit_i(2), I),
+                       UI("i", 1), B);
+  return main_prints(vdef("i", 1, false, I, lit_i(1),
+                          while_stmt(bin(OP_LE, UI("i", 1), lit_i(6), B),
+                                     if_stmt(even, print_stmt(UI("i", 1), NULL), NULL,
+                                             inc("i", 1, NULL)),
+                                     NULL)));
+}
+static AST_NODE *build_f4_if_while(void) { /* while uvnitř then větve, v else větvi příkaz */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(0),
+      if_stmt(bin(OP_LT, lit_i(1), lit_i(2), B),
+              while_stmt(bin(OP_LT, UI("i", 1), lit_i(3), B), inc("i", 1, NULL), NULL),
+              PS("no", NULL), print_stmt(UI("i", 1), NULL))));
+}
+static AST_NODE *build_f4_while_var_in_body(void) { /* proměnná uvnitř těla: DEFVAR musí být nahoře */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(1),
+      while_stmt(bin(OP_LE, UI("i", 1), lit_i(3), B),
+                 vdef("t", 2, true, I, bin(OP_MUL, UI("i", 1), lit_i(2), I),
+                      print_stmt(UI("t", 2), inc("i", 1, NULL))),
+                 NULL)));
+}
+static AST_NODE *build_f4_while_two(void) { /* dva while za sebou: návěští se nesmí opakovat */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(0),
+      while_stmt(bin(OP_LT, UI("i", 1), lit_i(2), B), print_stmt(UI("i", 1), inc("i", 1, NULL)),
+                 while_stmt(bin(OP_LT, UI("i", 1), lit_i(4), B),
+                            print_stmt(UI("i", 1), inc("i", 1, NULL)), NULL))));
+}
+static AST_NODE *build_f4_while_around(void) { /* příkaz před cyklem i za ním */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(1),
+      PS("<", while_stmt(bin(OP_LT, UI("i", 1), lit_i(3), B),
+                         print_stmt(UI("i", 1), inc("i", 1, NULL)), PS(">", NULL)))));
+}
+static AST_NODE *build_f4_while_string(void) { /* s = s + "a" v cyklu: pomocné proměnné pro CONCAT */
+  return main_prints(vdef(
+      "s", 1, false, S, lit_s(""),
+      vdef("i", 2, false, I, lit_i(0),
+           while_stmt(bin(OP_LT, UI("i", 2), lit_i(3), B),
+                      assign(use("s", 1, S), bin(OP_ADD, use("s", 1, S), lit_s("a"), S),
+                             inc("i", 2, NULL)),
+                      print_stmt(use("s", 1, S), NULL)))));
+}
+static AST_NODE *build_f4_while_helper(void) { /* while v main i v druhé funkci: návěští se nesmí shodovat */
+  return make_program(func(
+      "main", true,
+      vdef("i", 1, false, I, lit_i(0),
+           while_stmt(bin(OP_LT, UI("i", 1), lit_i(2), B), inc("i", 1, NULL),
+                      print_stmt(UI("i", 1), NULL))),
+      func("helper", false,
+           vdef("k", 2, false, I, lit_i(0),
+                while_stmt(bin(OP_LT, UI("k", 2), lit_i(1), B), inc("k", 2, NULL), NULL)),
+           NULL)));
+}
+static AST_NODE *build_f4_while_in_else(void) { /* proměnná a cyklus uvnitř else větve */
+  return main_prints(if_stmt(
+      lit_b(false), PS("A", NULL),
+      vdef("i", 1, false, I, lit_i(0),
+           while_stmt(bin(OP_LT, UI("i", 1), lit_i(2), B), print_stmt(UI("i", 1), inc("i", 1, NULL)),
+                      NULL)),
+      NULL));
+}
+static AST_NODE *build_f4_while_if_else(void) { /* if else v těle cyklu: aabb */
+  return main_prints(vdef(
+      "i", 1, false, I, lit_i(1),
+      while_stmt(bin(OP_LE, UI("i", 1), lit_i(4), B),
+                 if_stmt(bin(OP_LT, UI("i", 1), lit_i(3), B), PS("a", NULL), PS("b", NULL),
+                         inc("i", 1, NULL)),
+                 NULL)));
+}
+static AST_NODE *build_f4_while_double(void) { /* x = 1.0; while x < 3.0 { x = x + 1.0 } */
+  AST_NODE *step = assign(use("x", 1, D), bin(OP_ADD, use("x", 1, D), lit_d(1.0), D), NULL);
+  return main_prints(vdef("x", 1, false, D, lit_d(1.0),
+                          while_stmt(bin(OP_LT, use("x", 1, D), lit_d(3.0), B), step,
+                                     print_stmt(use("x", 1, D), NULL))));
+}
+static AST_NODE *build_f4_while_mixed(void) { /* while i < 2.5, i je Int: v podmínce INT2FLOATS */
+  return main_prints(vdef("i", 1, false, I, lit_i(1),
+                          while_stmt(bin(OP_LT, UI("i", 1), lit_d(2.5), B), inc("i", 1, NULL),
+                                     print_stmt(UI("i", 1), NULL))));
+}
+#undef PS
+#undef UI
+#undef I
+#undef D
+#undef S
+#undef B
+
+/* fáze 5: funkce, parametry, volání, return a rekurze. Typy uzlů a čísla proměnných (id) jako by je
+ * zapsala sémantika. Čísla jsou v celém programu unikátní: pomocné funkce používají 1 až 9, proměnné
+ * v main od 10. Jméno v kódu je jmeno$id. */
+#define I DATA_INT
+#define D DATA_DOUBLE
+#define S DATA_STRING
+#define B DATA_BOOL
+#define U DATA_UNIT
+#define PS(str, nx) print_stmt(lit_s(str), (nx))
+#define UI(name, id) use((name), (id), I)
+
+/* parametr: jméno, číslo, typ; další parametr přes next */
+static AST_NODE *par(const char *name, int id, DATA_TYPE t, AST_NODE *next) {
+  AST_NODE *n = ast_param_create(t, (char *)name, next);
+  n->id = id;
+  return n;
+}
+
+/* definice funkce (ne @main): návratový typ, parametry, tělo (řetěz příkazů); další funkce přes next */
+static AST_NODE *fdef(const char *name, DATA_TYPE ret, AST_NODE *params, AST_NODE *body,
+                      AST_NODE *next) {
+  return ast_func_def_create(make_body(body), params, next, ret, (char *)name, false, true);
+}
+
+/* @main funkce (Unit, bez parametrů) */
+static AST_NODE *main_fn(AST_NODE *body, AST_NODE *next) { return func("main", true, body, next); }
+
+/* volání funkce: argumenty (řetěz přes next, zleva doprava) a typ výsledku */
+static AST_NODE *fcall(const char *name, AST_NODE *args, DATA_TYPE t) {
+  AST_NODE *n = ast_call_create(args, (char *)name, false, true, NULL);
+  n->data_type = t;
+  return n;
+}
+
+/* volání jako příkaz: výsledek se zahodí; další příkaz přes next */
+static AST_NODE *fcall_stmt(AST_NODE *c, AST_NODE *next) { return ast_create(c, NULL, next, NODE_EXPR_STMT); }
+
+/* return výraz; e == NULL je prázdný return */
+static AST_NODE *fret(AST_NODE *e, AST_NODE *next) { return ast_return_create(e, next); }
+
+/* poslední výraz těla funkce = její návratová hodnota bez return */
+static AST_NODE *flast(AST_NODE *e, AST_NODE *next) { return ast_create(e, NULL, next, NODE_EXPR_STMT); }
+
+/* argumenty za sebou (zleva doprava) */
+static AST_NODE *a2(AST_NODE *a, AST_NODE *b) {
+  a->next = b;
+  return a;
+}
+static AST_NODE *a3(AST_NODE *a, AST_NODE *b, AST_NODE *c) {
+  a->next = b;
+  b->next = c;
+  return a;
+}
+static AST_NODE *a4(AST_NODE *a, AST_NODE *b, AST_NODE *c, AST_NODE *d) {
+  a->next = b;
+  b->next = c;
+  c->next = d;
+  return a;
+}
+
+/* def hello(): Unit = print("Hi") */
+static AST_NODE *hello_fn(AST_NODE *next) { return fdef("hello", U, NULL, PS("Hi", NULL), next); }
+/* def show(x: Int): Unit = print(x)   (x má číslo 1) */
+static AST_NODE *show_fn(AST_NODE *next) {
+  return fdef("show", U, par("x", 1, I, NULL), print_stmt(UI("x", 1), NULL), next);
+}
+/* def pdiff(a: Int, b: Int): Unit = print(a - b)   (a = 1, b = 2: záleží na pořadí argumentů) */
+static AST_NODE *pdiff_fn(AST_NODE *next) {
+  return fdef("pdiff", U, par("a", 1, I, par("b", 2, I, NULL)),
+              print_stmt(bin(OP_SUB, UI("a", 1), UI("b", 2), I), NULL), next);
+}
+/* def twice(x: Int): Int = return x * 2 */
+static AST_NODE *twice_fn(AST_NODE *next) {
+  return fdef("twice", I, par("x", 1, I, NULL), fret(bin(OP_MUL, UI("x", 1), lit_i(2), I), NULL), next);
+}
+
+static AST_NODE *build_f5_call_unit(void) {
+  return make_program(main_fn(fcall_stmt(fcall("hello", NULL, U), NULL), hello_fn(NULL)));
+}
+static AST_NODE *build_f5_call_twice(void) {
+  return make_program(main_fn(
+      fcall_stmt(fcall("hello", NULL, U), fcall_stmt(fcall("hello", NULL, U), NULL)), hello_fn(NULL)));
+}
+static AST_NODE *build_f5_call_chain(void) { /* main volá a, a volá b */
+  return make_program(main_fn(
+      fcall_stmt(fcall("a", NULL, U), NULL),
+      fdef("a", U, NULL, PS("<", fcall_stmt(fcall("b", NULL, U), PS(">", NULL))),
+           fdef("b", U, NULL, PS("b", NULL), NULL))));
+}
+static AST_NODE *build_f5_call_main_last(void) { /* helper je definovaný před main */
+  return make_program(hello_fn(main_fn(fcall_stmt(fcall("hello", NULL, U), NULL), NULL)));
+}
+static AST_NODE *build_f5_entry_run(void) { /* @main funkce se jmenuje run a volá další */
+  return make_program(func("run", true, fcall_stmt(fcall("hello", NULL, U), NULL), hello_fn(NULL)));
+}
+
+static AST_NODE *build_f5_param_one(void) {
+  return make_program(main_fn(fcall_stmt(fcall("show", lit_i(42), U), NULL), show_fn(NULL)));
+}
+static AST_NODE *build_f5_param_two(void) { /* pdiff(10, 3) = 7: pořadí argumentů */
+  return make_program(
+      main_fn(fcall_stmt(fcall("pdiff", a2(lit_i(10), lit_i(3)), U), NULL), pdiff_fn(NULL)));
+}
+static AST_NODE *build_f5_param_types(void) { /* show3("x", 5, 2.5): tři parametry tří typů */
+  AST_NODE *body =
+      print_stmt(use("s", 1, S), print_stmt(UI("n", 2), print_stmt(use("d", 3, D), NULL)));
+  AST_NODE *f = fdef("show3", U, par("s", 1, S, par("n", 2, I, par("d", 3, D, NULL))), body, NULL);
+  return make_program(
+      main_fn(fcall_stmt(fcall("show3", a3(lit_s("x"), lit_i(5), lit_d(2.5)), U), NULL), f));
+}
+static AST_NODE *build_f5_param_expr(void) { /* pdiff(1 + 2, 3 * 4) = -9: argumenty jsou výrazy */
+  AST_NODE *args = a2(bin(OP_ADD, lit_i(1), lit_i(2), I), bin(OP_MUL, lit_i(3), lit_i(4), I));
+  return make_program(main_fn(fcall_stmt(fcall("pdiff", args, U), NULL), pdiff_fn(NULL)));
+}
+static AST_NODE *build_f5_param_vars(void) { /* val a = 10; val b = 4; pdiff(a, b) */
+  return make_program(main_fn(
+      vdef("a", 10, true, I, lit_i(10),
+           vdef("b", 11, true, I, lit_i(4),
+                fcall_stmt(fcall("pdiff", a2(UI("a", 10), UI("b", 11)), U), NULL))),
+      pdiff_fn(NULL)));
+}
+static AST_NODE *build_f5_param_frames(void) { /* var x = 1; show(5); print(x): proměnná volajícího přežije */
+  return make_program(main_fn(vdef("x", 10, false, I, lit_i(1),
+                                   fcall_stmt(fcall("show", lit_i(5), U), print_stmt(UI("x", 10), NULL))),
+                              show_fn(NULL)));
+}
+static AST_NODE *build_f5_param_concat(void) { /* greet(name: String): print("Hi " + name) */
+  AST_NODE *f = fdef("greet", U, par("name", 1, S, NULL),
+                     print_stmt(bin(OP_ADD, lit_s("Hi "), use("name", 1, S), S), NULL), NULL);
+  return make_program(main_fn(fcall_stmt(fcall("greet", lit_s("Bob"), U), NULL), f));
+}
+static AST_NODE *build_f5_param_loop(void) { /* count(n): var i = 1; while i <= n { print(i); i = i + 1 } */
+  AST_NODE *body = vdef("i", 2, false, I, lit_i(1),
+                        while_stmt(bin(OP_LE, UI("i", 2), UI("n", 1), B),
+                                   print_stmt(UI("i", 2), inc("i", 2, NULL)), NULL));
+  AST_NODE *f = fdef("count", U, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(fcall_stmt(fcall("count", lit_i(3), U), NULL), f));
+}
+static AST_NODE *build_f5_param_if(void) { /* sign(n): if n < 0 { neg } else { pos }; sign(-3), sign(2) */
+  AST_NODE *body = if_stmt(bin(OP_LT, UI("n", 1), lit_i(0), B), PS("neg", NULL), PS("pos", NULL), NULL);
+  AST_NODE *f = fdef("sign", U, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(
+      fcall_stmt(fcall("sign", lit_i(-3), U), fcall_stmt(fcall("sign", lit_i(2), U), NULL)), f));
+}
+static AST_NODE *build_f5_param_four(void) { /* sum4(1, 2, 3, 4) = 1234: čtyři parametry za sebou */
+  AST_NODE *x = bin(OP_ADD,
+                    bin(OP_ADD,
+                        bin(OP_ADD, bin(OP_MUL, UI("a", 1), lit_i(1000), I),
+                            bin(OP_MUL, UI("b", 2), lit_i(100), I), I),
+                        bin(OP_MUL, UI("c", 3), lit_i(10), I), I),
+                    UI("d", 4), I);
+  AST_NODE *f = fdef("sum4", U, par("a", 1, I, par("b", 2, I, par("c", 3, I, par("d", 4, I, NULL)))),
+                     print_stmt(x, NULL), NULL);
+  return make_program(main_fn(
+      fcall_stmt(fcall("sum4", a4(lit_i(1), lit_i(2), lit_i(3), lit_i(4)), U), NULL), f));
+}
+static AST_NODE *build_f5_param_mixed(void) { /* scale(x: Double, k: Int): print(x * k), INT2FLOATS v těle */
+  AST_NODE *f = fdef("scale", U, par("x", 1, D, par("k", 2, I, NULL)),
+                     print_stmt(bin(OP_MUL, use("x", 1, D), UI("k", 2), D), NULL), NULL);
+  return make_program(
+      main_fn(fcall_stmt(fcall("scale", a2(lit_d(1.5), lit_i(2)), U), NULL), f));
+}
+
+static AST_NODE *build_f5_ret_int(void) { /* val r = twice(21); print(r) */
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("twice", lit_i(21), I), print_stmt(UI("r", 10), NULL)),
+      twice_fn(NULL)));
+}
+static AST_NODE *build_f5_ret_last(void) { /* hodnota z posledního výrazu těla, bez return */
+  AST_NODE *f = fdef("twice", I, par("x", 1, I, NULL),
+                     flast(bin(OP_MUL, UI("x", 1), lit_i(2), I), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("twice", lit_i(21), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f5_ret_last_call(void) { /* poslední výraz těla je volání jiné funkce */
+  AST_NODE *wrapper = fdef("wrapper", I, par("y", 2, I, NULL), flast(fcall("twice", UI("y", 2), I), NULL),
+                           twice_fn(NULL));
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("wrapper", lit_i(4), I), print_stmt(UI("r", 10), NULL)), wrapper));
+}
+static AST_NODE *build_f5_ret_last_after(void) { /* print(v); x + 1: příkaz před posledním výrazem */
+  AST_NODE *f = fdef("incr", I, par("x", 1, I, NULL),
+                     PS("v", flast(bin(OP_ADD, UI("x", 1), lit_i(1), I), NULL)), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("incr", lit_i(1), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f5_ret_string(void) {
+  AST_NODE *f = fdef("greeting", S, par("n", 1, S, NULL),
+                     fret(bin(OP_ADD, lit_s("Hi "), use("n", 1, S), S), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, S, fcall("greeting", lit_s("Ann"), S), print_stmt(use("r", 10, S), NULL)), f));
+}
+static AST_NODE *build_f5_ret_double(void) { /* half(5.0) = 2.5 */
+  AST_NODE *f = fdef("half", D, par("x", 1, D, NULL),
+                     fret(bin(OP_DIV, use("x", 1, D), lit_d(2.0), D), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, D, fcall("half", lit_d(5.0), D), print_stmt(use("r", 10, D), NULL)), f));
+}
+static AST_NODE *build_f5_ret_bool(void) { /* isPos(3), isPos(-1) */
+  AST_NODE *f = fdef("isPos", B, par("n", 1, I, NULL), fret(bin(OP_GT, UI("n", 1), lit_i(0), B), NULL), NULL);
+  return make_program(main_fn(
+      vdef("b", 10, true, B, fcall("isPos", lit_i(3), B),
+           vdef("c", 11, true, B, fcall("isPos", lit_i(-1), B),
+                print_stmt(use("b", 10, B), print_stmt(use("c", 11, B), NULL)))),
+      f));
+}
+static AST_NODE *build_f5_ret_early(void) { /* abs(n): if n < 0 { return -n }; return n */
+  AST_NODE *body = if_stmt(bin(OP_LT, UI("n", 1), lit_i(0), B), fret(neg(UI("n", 1), I), NULL), NULL,
+                           fret(UI("n", 1), NULL));
+  AST_NODE *f = fdef("abs", I, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(
+      vdef("a", 10, true, I, fcall("abs", lit_i(-5), I),
+           vdef("b", 11, true, I, fcall("abs", lit_i(7), I),
+                print_stmt(UI("a", 10), print_stmt(UI("b", 11), NULL)))),
+      f));
+}
+static AST_NODE *build_f5_ret_early_unit(void) { /* prázdný return v Unit funkci */
+  AST_NODE *body = if_stmt(bin(OP_GT, UI("n", 1), lit_i(0), B), PS("pos", fret(NULL, NULL)), NULL,
+                           PS("neg", NULL));
+  AST_NODE *f = fdef("check", U, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(
+      fcall_stmt(fcall("check", lit_i(1), U), fcall_stmt(fcall("check", lit_i(-1), U), NULL)), f));
+}
+static AST_NODE *build_f5_ret_in_loop(void) { /* return uvnitř while uvnitř if: firstOver(50) = 8 */
+  AST_NODE *loop = while_stmt(
+      bin(OP_LT, UI("i", 2), lit_i(100), B),
+      if_stmt(bin(OP_GT, bin(OP_MUL, UI("i", 2), UI("i", 2), I), UI("limit", 1), B), fret(UI("i", 2), NULL),
+              NULL, inc("i", 2, NULL)),
+      fret(lit_i(0), NULL));
+  AST_NODE *f = fdef("firstOver", I, par("limit", 1, I, NULL), vdef("i", 2, false, I, lit_i(1), loop), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("firstOver", lit_i(50), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f5_ret_two_calls(void) { /* a = twice(5), b = twice(6), print(a + b) */
+  return make_program(main_fn(
+      vdef("a", 10, true, I, fcall("twice", lit_i(5), I),
+           vdef("b", 11, true, I, fcall("twice", lit_i(6), I),
+                print_stmt(bin(OP_ADD, UI("a", 10), UI("b", 11), I), NULL))),
+      twice_fn(NULL)));
+}
+static AST_NODE *build_f5_ret_discard(void) { /* twice(5) jako příkaz: výsledek se zahodí */
+  return make_program(
+      main_fn(fcall_stmt(fcall("twice", lit_i(5), I), PS("ok", NULL)), twice_fn(NULL)));
+}
+static AST_NODE *build_f5_call_in_loop(void) { /* while i <= 3 { show(i); i = i + 1 } */
+  return make_program(main_fn(
+      vdef("i", 10, false, I, lit_i(1),
+           while_stmt(bin(OP_LE, UI("i", 10), lit_i(3), B),
+                      fcall_stmt(fcall("show", UI("i", 10), U), inc("i", 10, NULL)), NULL)),
+      show_fn(NULL)));
+}
+static AST_NODE *build_f5_call_in_if(void) { /* volání ve větvích if */
+  return make_program(main_fn(
+      if_stmt(lit_b(true), fcall_stmt(fcall("show", lit_i(1), U), NULL),
+              fcall_stmt(fcall("show", lit_i(2), U), NULL),
+              if_stmt(lit_b(false), fcall_stmt(fcall("show", lit_i(3), U), NULL),
+                      fcall_stmt(fcall("show", lit_i(4), U), NULL), NULL)),
+      show_fn(NULL)));
+}
+
+/* def fact(n: Int): Int: if n <= 1 { return 1 }; val m = n - 1; val r = fact(m); return n * r */
+static AST_NODE *fact_fn(AST_NODE *next) {
+  AST_NODE *body = if_stmt(
+      bin(OP_LE, UI("n", 1), lit_i(1), B), fret(lit_i(1), NULL), NULL,
+      vdef("m", 2, true, I, bin(OP_SUB, UI("n", 1), lit_i(1), I),
+           vdef("r", 3, true, I, fcall("fact", UI("m", 2), I),
+                fret(bin(OP_MUL, UI("n", 1), UI("r", 3), I), NULL))));
+  return fdef("fact", I, par("n", 1, I, NULL), body, next);
+}
+static AST_NODE *fact_prog(long long n) {
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("fact", lit_i(n), I), print_stmt(UI("r", 10), NULL)), fact_fn(NULL)));
+}
+static AST_NODE *build_f5_fact(void) { return fact_prog(5); }
+static AST_NODE *build_f5_fact_10(void) { return fact_prog(10); }
+static AST_NODE *build_f5_fib(void) { /* fib(10) = 55: dvě rekurzivní volání */
+  AST_NODE *body = if_stmt(
+      bin(OP_LT, UI("n", 1), lit_i(2), B), fret(UI("n", 1), NULL), NULL,
+      vdef("a", 2, true, I, fcall("fib", bin(OP_SUB, UI("n", 1), lit_i(1), I), I),
+           vdef("b", 3, true, I, fcall("fib", bin(OP_SUB, UI("n", 1), lit_i(2), I), I),
+                fret(bin(OP_ADD, UI("a", 2), UI("b", 3), I), NULL))));
+  AST_NODE *f = fdef("fib", I, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("fib", lit_i(10), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f5_sum_rec(void) { /* sumTo(20) = 210: hloubka rekurze 20 */
+  AST_NODE *body = if_stmt(
+      bin(OP_EQ, UI("n", 1), lit_i(0), B), fret(lit_i(0), NULL), NULL,
+      vdef("r", 2, true, I, fcall("sumTo", bin(OP_SUB, UI("n", 1), lit_i(1), I), I),
+           fret(bin(OP_ADD, UI("n", 1), UI("r", 2), I), NULL)));
+  AST_NODE *f = fdef("sumTo", I, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("sumTo", lit_i(20), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f5_countdown(void) { /* Unit rekurze: countdown(3) vypíše 321 */
+  AST_NODE *body = if_stmt(
+      bin(OP_GT, UI("n", 1), lit_i(0), B),
+      print_stmt(UI("n", 1),
+                 fcall_stmt(fcall("countdown", bin(OP_SUB, UI("n", 1), lit_i(1), I), U), NULL)),
+      NULL, NULL);
+  AST_NODE *f = fdef("countdown", U, par("n", 1, I, NULL), body, NULL);
+  return make_program(main_fn(fcall_stmt(fcall("countdown", lit_i(3), U), NULL), f));
+}
+static AST_NODE *build_f5_mutual(void) { /* isEven volá isOdd a naopak: isEven(4), isEven(3) */
+  AST_NODE *odd = fdef(
+      "isOdd", B, par("m", 3, I, NULL),
+      if_stmt(bin(OP_EQ, UI("m", 3), lit_i(0), B), fret(lit_b(false), NULL), NULL,
+              vdef("q", 4, true, B, fcall("isEven", bin(OP_SUB, UI("m", 3), lit_i(1), I), B),
+                   fret(use("q", 4, B), NULL))),
+      NULL);
+  AST_NODE *even = fdef(
+      "isEven", B, par("n", 1, I, NULL),
+      if_stmt(bin(OP_EQ, UI("n", 1), lit_i(0), B), fret(lit_b(true), NULL), NULL,
+              vdef("r", 2, true, B, fcall("isOdd", bin(OP_SUB, UI("n", 1), lit_i(1), I), B),
+                   fret(use("r", 2, B), NULL))),
+      odd);
+  return make_program(main_fn(
+      vdef("a", 10, true, B, fcall("isEven", lit_i(4), B),
+           vdef("b", 11, true, B, fcall("isEven", lit_i(3), B),
+                print_stmt(use("a", 10, B), print_stmt(use("b", 11, B), NULL)))),
+      even));
+}
+#undef PS
+#undef UI
+#undef I
+#undef D
+#undef S
+#undef B
+#undef U
+
+/* fáze 6: vestavěné funkce. Volání je NODE_CALL se jménem funkce a argumenty ve third; v základním
+ * zadání smí stát jen jako příkaz nebo vpravo od val a =, proto výsledek většinou ukládám do
+ * proměnné (val) a vypisuju až ji. Případy *_nested volají funkci uvnitř jiného volání (FUNEXP). */
+#define I DATA_INT
+#define D DATA_DOUBLE
+#define S DATA_STRING
+#define U DATA_UNIT
+#define B6(name, args, type) fcall((name), (args), (type))
+#define PS(str, nx) print_stmt(lit_s(str), (nx))
+#define UI(name, id) use((name), (id), I)
+#define US(name, id) use((name), (id), S)
+#define UD(name, id) use((name), (id), D)
+
+/* val v = fn(args); print(v); next. Typ proměnné je typ výsledku volání. */
+static AST_NODE *val_print(const char *v, int id, AST_NODE *call, DATA_TYPE t, AST_NODE *next) {
+  return vdef(v, id, true, t, call, print_stmt(use(v, id, t), next));
+}
+static AST_NODE *prog6(AST_NODE *body) { return make_program(main_fn(body, NULL)); }
+
+/* strLength */
+static AST_NODE *build_f6_strlen(void) {
+  return prog6(val_print("n", 10, B6("strLength", lit_s("Ahoj"), I), I, NULL));
+}
+static AST_NODE *build_f6_strlen_empty(void) {
+  return prog6(val_print("n", 10, B6("strLength", lit_s(""), I), I, NULL));
+}
+static AST_NODE *build_f6_strlen_var(void) {
+  return prog6(vdef("s", 10, true, S, lit_s("abcde"),
+                    val_print("n", 11, B6("strLength", US("s", 10), I), I, NULL)));
+}
+static AST_NODE *build_f6_strlen_special(void) { /* mezera a nový řádek se počítají jako znaky */
+  return prog6(val_print("n", 10, B6("strLength", lit_s("a b\nc"), I), I, NULL));
+}
+/* toInt */
+static AST_NODE *build_f6_toint(void) {
+  return prog6(val_print("a", 10, B6("toInt", lit_d(3.99), I), I,
+                         val_print("b", 11, B6("toInt", lit_d(-2.7), I), I, NULL)));
+}
+static AST_NODE *build_f6_toint_var(void) {
+  return prog6(vdef("d", 10, true, D, lit_d(7.5),
+                    val_print("n", 11, B6("toInt", UD("d", 10), I), I, NULL)));
+}
+/* chr, ord */
+static AST_NODE *build_f6_chr(void) {
+  return prog6(val_print("a", 10, B6("chr", lit_i(72), S), S,
+                         val_print("b", 11, B6("chr", lit_i(105), S), S, NULL)));
+}
+static AST_NODE *build_f6_chr_edges(void) { /* nový řádek (10) a nejvyšší znak (127), strLength nad nimi */
+  return prog6(val_print("a", 10, B6("chr", lit_i(10), S), S,
+                         val_print("b", 11, B6("strLength", B6("chr", lit_i(127), S), I), I, NULL)));
+}
+static AST_NODE *build_f6_ord(void) {
+  return prog6(val_print("a", 10, B6("ord", a2(lit_s("A"), lit_i(0)), I), I,
+                         val_print("b", 11, B6("ord", a2(lit_s("abc"), lit_i(2)), I), I, NULL)));
+}
+static AST_NODE *build_f6_ord_out(void) { /* index mimo řetězec nebo prázdný řetězec: -1 */
+  return prog6(val_print("a", 10, B6("ord", a2(lit_s("abc"), lit_i(3)), I), I,
+                         val_print("b", 11, B6("ord", a2(lit_s("abc"), lit_i(-1)), I), I,
+                                   val_print("c", 12, B6("ord", a2(lit_s(""), lit_i(0)), I), I, NULL))));
+}
+static AST_NODE *build_f6_ord_var(void) { /* ord(s, i) s proměnnými */
+  return prog6(vdef("s", 10, true, S, lit_s("xyz"),
+                    vdef("i", 11, true, I, lit_i(1),
+                         val_print("c", 12, B6("ord", a2(US("s", 10), UI("i", 11)), I), I, NULL))));
+}
+/* subStr */
+static AST_NODE *sub3(const char *s, long long a, long long b) {
+  return B6("subStr", a3(lit_s(s), lit_i(a), lit_i(b)), S);
+}
+static AST_NODE *build_f6_substr(void) { return prog6(val_print("r", 10, sub3("abcdef", 1, 4), S, NULL)); }
+static AST_NODE *build_f6_substr_full(void) { return prog6(val_print("r", 10, sub3("abc", 0, 3), S, NULL)); }
+static AST_NODE *build_f6_substr_last(void) { return prog6(val_print("r", 10, sub3("abc", 2, 3), S, NULL)); }
+static AST_NODE *build_f6_substr_empty(void) { /* start == end: prázdný řetězec, ne chyba */
+  return prog6(PS("<", val_print("r", 10, sub3("abc", 1, 1), S, PS(">", NULL))));
+}
+static AST_NODE *build_f6_substr_var(void) {
+  return prog6(vdef("s", 10, true, S, lit_s("Hello World"),
+                    vdef("a", 11, true, I, lit_i(6),
+                         vdef("b", 12, true, I, lit_i(11),
+                              val_print("r", 13, B6("subStr", a3(US("s", 10), UI("a", 11), UI("b", 12)), S),
+                                        S, NULL)))));
+}
+static AST_NODE *build_f6_substr_two(void) { /* dvě volání za sebou, každé s jinými mezemi */
+  return prog6(val_print("a", 10, sub3("abcdef", 0, 2), S, val_print("b", 11, sub3("abcdef", 3, 6), S, NULL)));
+}
+/* toStr */
+static AST_NODE *build_f6_tostr_int(void) {
+  return prog6(val_print("a", 10, B6("toStr", lit_i(42), S), S,
+                         val_print("b", 11, B6("toStr", lit_i(-7), S), S, NULL)));
+}
+static AST_NODE *build_f6_tostr_double(void) { /* %.2f: 2.50 a 3.14, ne hexadecimálně */
+  return prog6(val_print("a", 10, B6("toStr", lit_d(2.5), S), S,
+                         val_print("b", 11, B6("toStr", lit_d(3.14159), S), S, NULL)));
+}
+static AST_NODE *build_f6_tostr_double_neg(void) {
+  return prog6(val_print("a", 10, B6("toStr", lit_d(-1.5), S), S,
+                         val_print("b", 11, B6("toStr", lit_d(0.0), S), S,
+                                   val_print("c", 12, B6("toStr", lit_d(100.0), S), S, NULL))));
+}
+static AST_NODE *build_f6_tostr_string(void) {
+  return prog6(val_print("a", 10, B6("toStr", lit_s("abc"), S), S, NULL));
+}
+static AST_NODE *build_f6_tostr_var(void) { /* toStr(n) a spojení výsledku s textem */
+  return prog6(vdef("n", 10, true, I, lit_i(12),
+                    vdef("s", 11, true, S, B6("toStr", UI("n", 10), S),
+                         vdef("t", 12, true, S, bin(OP_ADD, lit_s("n="), US("s", 11), S),
+                              print_stmt(US("t", 12), NULL)))));
+}
+static AST_NODE *build_f6_tostr_vars(void) { /* toStr nad proměnnými Int, Double i String */
+  return prog6(vdef("i", 10, true, I, lit_i(5),
+                    vdef("d", 11, true, D, lit_d(0.5),
+                         vdef("t", 12, true, S, lit_s("t"),
+                              val_print("a", 13, B6("toStr", UI("i", 10), S), S,
+                                        val_print("b", 14, B6("toStr", UD("d", 11), S), S,
+                                                  val_print("c", 15, B6("toStr", US("t", 12), S), S, NULL)))))));
+}
+/* víc volání téže i různých funkcí: každá vestavěná funkce se definuje jednou */
+static AST_NODE *build_f6_twice_same(void) {
+  return prog6(val_print("a", 10, B6("strLength", lit_s("ab"), I), I,
+                         val_print("b", 11, B6("toStr", lit_i(1), S), S,
+                                   val_print("c", 12, B6("strLength", lit_s("abc"), I), I,
+                                             val_print("d", 13, B6("toStr", lit_i(2), S), S, NULL)))));
+}
+static AST_NODE *build_f6_all(void) { /* všechny funkce bez vstupu v jednom programu */
+  return prog6(vdef(
+      "s", 10, true, S, B6("subStr", a3(lit_s("hello"), lit_i(1), lit_i(4)), S), /* "ell" */
+      val_print("n", 11, B6("strLength", US("s", 10), I), I,                      /* 3 */
+                val_print("o", 12, B6("ord", a2(US("s", 10), lit_i(0)), I), I,       /* 101 */
+                          val_print("c", 13, B6("chr", UI("o", 12), S), S,            /* "e" */
+                                    val_print("t", 14, B6("toStr", UI("n", 11), S), S,   /* "3" */
+                                              val_print("d", 15, B6("toInt", lit_d(9.9), I), I, NULL))))))); /* 9 */
+}
+/* vestavěné funkce uvnitř cyklu a uvnitř uživatelských funkcí */
+static AST_NODE *build_f6_loop(void) { /* každý znak "hello" o jedna dál: ifmmp */
+  AST_NODE *body = vdef("code", 12, true, I, B6("ord", a2(US("s", 10), UI("i", 11)), I),
+                        vdef("nxt", 13, true, I, add_int(UI("code", 12), lit_i(1)),
+                             vdef("c", 14, true, S, B6("chr", UI("nxt", 13), S),
+                                  print_stmt(US("c", 14), inc("i", 11, NULL)))));
+  return prog6(vdef("s", 10, true, S, lit_s("hello"),
+                    vdef("n", 15, true, I, B6("strLength", US("s", 10), I),
+                         vdef("i", 11, false, I, lit_i(0),
+                              while_stmt(bin(OP_LT, UI("i", 11), UI("n", 15), DATA_BOOL), body, NULL)))));
+}
+static AST_NODE *build_f6_in_func(void) { /* uživatelská funkce volá vestavěnou a vrací její výsledek */
+  AST_NODE *f = fdef("lenOf", I, par("s", 1, S, NULL), fret(B6("strLength", US("s", 1), I), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("lenOf", lit_s("abcd"), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f6_in_func_last(void) { /* hodnota z posledního výrazu: vestavěné volání */
+  AST_NODE *f = fdef("lenOf", I, par("s", 1, S, NULL), flast(B6("strLength", US("s", 1), I), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("lenOf", lit_s("abcd"), I), print_stmt(UI("r", 10), NULL)), f));
+}
+static AST_NODE *build_f6_discard(void) { /* vestavěná funkce jako příkaz: výsledek se zahodí */
+  return prog6(fcall_stmt(B6("strLength", lit_s("abc"), I), fcall_stmt(B6("chr", lit_i(65), S), PS("ok", NULL))));
+}
+/* volání uvnitř volání (rozšíření FUNEXP) */
+static AST_NODE *build_f6_nested(void) { /* print(toStr(strLength(subStr("abcd", 1, 3)))) = 2 */
+  return prog6(print_stmt(B6("toStr", B6("strLength", sub3("abcd", 1, 3), I), S), NULL));
+}
+static AST_NODE *build_f6_nested_user(void) { /* show(strLength("abc")): vestavěné volání jako argument */
+  return make_program(main_fn(fcall_stmt(fcall("show", B6("strLength", lit_s("abc"), I), U), NULL), show_fn(NULL)));
+}
+static AST_NODE *build_f6_nested_expr(void) { /* strLength("ab") + strLength("cde") * 2 = 8 */
+  return prog6(print_stmt(bin(OP_ADD, B6("strLength", lit_s("ab"), I),
+                              bin(OP_MUL, B6("strLength", lit_s("cde"), I), lit_i(2), I), I),
+                          NULL));
+}
+static AST_NODE *build_f6_nested_args(void) { /* subStr s argumenty z volání: subStr("abcdef", ord("A", 0) - 64, 4) */
+  return prog6(print_stmt(B6("subStr", a3(lit_s("abcdef"),
+                                        bin(OP_SUB, B6("ord", a2(lit_s("A"), lit_i(0)), I), lit_i(64), I),
+                                        lit_i(4)), S),
+                          NULL));
+}
+
+/* běhové chyby: výstup před chybou je v expect_out, kód v posledním poli případu */
+static AST_NODE *err_sub(const char *s, long long a, long long b) {
+  return prog6(PS("a", val_print("r", 10, sub3(s, a, b), S, PS("b", NULL))));
+}
+static AST_NODE *build_f6_substr_neg_start(void) { return err_sub("abc", -1, 2); }
+static AST_NODE *build_f6_substr_neg_end(void) { return err_sub("abc", 1, -1); }
+static AST_NODE *build_f6_substr_start_gt_end(void) { return err_sub("abc", 2, 1); }
+static AST_NODE *build_f6_substr_start_len(void) { return err_sub("abc", 3, 3); }
+static AST_NODE *build_f6_substr_end_len(void) { return err_sub("abc", 0, 4); }
+static AST_NODE *build_f6_substr_empty_str(void) { return err_sub("", 0, 0); }
+static AST_NODE *build_f6_chr_big(void) {
+  return prog6(PS("a", val_print("r", 10, B6("chr", lit_i(128), S), S, PS("b", NULL))));
+}
+static AST_NODE *build_f6_chr_neg(void) {
+  return prog6(PS("a", val_print("r", 10, B6("chr", lit_i(-1), S), S, PS("b", NULL))));
+}
+static AST_NODE *build_f6_div_zero(void) { /* celočíselné dělení nulou: chyba 57 z interpretu */
+  return prog6(PS("a", print_stmt(bin(OP_DIV, lit_i(1), lit_i(0), I), PS("b", NULL))));
+}
+
+/* vstup: readInt, readDouble, readLine */
+static AST_NODE *build_f6_readint(void) { return prog6(val_print("n", 10, B6("readInt", NULL, I), I, NULL)); }
+static AST_NODE *build_f6_readint_calc(void) { /* dvě čísla: 20 + 22 */
+  return prog6(vdef("a", 10, true, I, B6("readInt", NULL, I),
+                    vdef("b", 11, true, I, B6("readInt", NULL, I),
+                         print_stmt(add_int(UI("a", 10), UI("b", 11)), NULL))));
+}
+static AST_NODE *build_f6_readdouble(void) {
+  return prog6(val_print("d", 10, B6("readDouble", NULL, D), D, NULL));
+}
+static AST_NODE *build_f6_readline(void) { /* dva řádky, každý včetně \n */
+  return prog6(val_print("a", 10, B6("readLine", NULL, S), S, val_print("b", 11, B6("readLine", NULL, S), S, NULL)));
+}
+static AST_NODE *build_f6_readline_brackets(void) { /* < řádek > : vidět, jestli je prázdný */
+  return prog6(PS("<", val_print("a", 10, B6("readLine", NULL, S), S, PS(">", NULL))));
+}
+static AST_NODE *build_f6_read_mixed(void) { /* readInt, readLine, readDouble za sebou */
+  return prog6(val_print("n", 10, B6("readInt", NULL, I), I,
+                         val_print("l", 11, B6("readLine", NULL, S), S,
+                                   val_print("d", 12, B6("readDouble", NULL, D), D, NULL))));
+}
+static AST_NODE *build_f6_read_loop(void) { /* n = readInt(); sečte dalších n čísel */
+  AST_NODE *body = vdef("x", 14, true, I, B6("readInt", NULL, I),
+                        assign(UI("sum", 12), add_int(UI("sum", 12), UI("x", 14)), inc("i", 13, NULL)));
+  return prog6(vdef("n", 10, true, I, B6("readInt", NULL, I),
+                    vdef("sum", 12, false, I, lit_i(0),
+                         vdef("i", 13, false, I, lit_i(0),
+                              while_stmt(bin(OP_LT, UI("i", 13), UI("n", 10), DATA_BOOL), body,
+                                         print_stmt(UI("sum", 12), NULL))))));
+}
+static AST_NODE *build_f6_read_discard(void) { /* první číslo se zahodí, vypíše se druhé */
+  return prog6(fcall_stmt(B6("readInt", NULL, I), val_print("x", 10, B6("readInt", NULL, I), I, NULL)));
+}
+static AST_NODE *build_f6_read_func(void) { /* čtení uvnitř uživatelské funkce: sum2() */
+  AST_NODE *f = fdef("sum2", I, NULL,
+                     vdef("a", 1, true, I, B6("readInt", NULL, I),
+                          vdef("b", 2, true, I, B6("readInt", NULL, I),
+                               fret(add_int(UI("a", 1), UI("b", 2)), NULL))),
+                     NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, I, fcall("sum2", NULL, I), print_stmt(UI("r", 10), NULL)), f));
+}
+#undef PS
+#undef UI
+#undef US
+#undef UD
+#undef B6
+#undef I
+#undef D
+#undef S
+#undef U
+
 typedef struct {
   const char *name;
   int phase;
@@ -455,7 +1412,9 @@ typedef struct {
   AST_NODE *(*build)(void);
   const char *desc;
   const char *expect_out; /* co má program vypsat na stdout */
-  const char *must[3];    /* slova (tokeny), která se musí v kódu objevit; ukončeno NULL */
+  const char *must[4];    /* slova (tokeny), která se musí v kódu objevit; ukončeno NULL */
+  const char *input;      /* co program dostane na standardním vstupu (NULL = nic) */
+  int exit_code;          /* s jakým kódem má program skončit (0 = bez chyby) */
 } Case;
 
 static const Case CASES[] = {
@@ -578,6 +1537,284 @@ static const Case CASES[] = {
      {NULL}},
     {"f3_in_helper", 3, "main", {"helper", NULL}, build_f3_in_helper,
      "proměnná i ve druhé funkci (ta má mít vlastní DEFVAR)", "2", {"LF@m$1", "LF@h$2", NULL}},
+
+    {"f4_if_true", 4, "main", {NULL}, build_f4_if_true, "if true { A }", "A", {NULL}},
+    {"f4_if_false", 4, "main", {NULL}, build_f4_if_false, "if false { A }; Z: větev se přeskočí", "Z", {NULL}},
+    {"f4_if_else_true", 4, "main", {NULL}, build_f4_if_else_true, "if true { A } else { B }", "A", {NULL}},
+    {"f4_if_else_false", 4, "main", {NULL}, build_f4_if_else_false, "if false { A } else { B }", "B", {NULL}},
+    {"f4_if_cmp", 4, "main", {NULL}, build_f4_if_cmp, "<, if 1 < 2 { A } else { B }, >", "<A>", {NULL}},
+    {"f4_if_cmp_else", 4, "main", {NULL}, build_f4_if_cmp_else, "<, if 2 < 1 { A } else { B }, >", "<B>", {NULL}},
+    {"f4_if_multi", 4, "main", {NULL}, build_f4_if_multi,
+     "více příkazů ve větvích: if true { 1 2 } else { 3 4 }", "12", {NULL}},
+    {"f4_if_multi_else", 4, "main", {NULL}, build_f4_if_multi_else,
+     "více příkazů ve větvích: if false { 1 2 } else { 3 4 }", "34", {NULL}},
+    {"f4_if_two_ifs", 4, "main", {NULL}, build_f4_if_two_ifs, "dvě if za sebou (návěští se nesmí opakovat)", "AD",
+     {NULL}},
+    {"f4_if_three", 4, "main", {NULL}, build_f4_if_three, "tři if bez else za sebou", "AB", {NULL}},
+    {"f4_if_nested", 4, "main", {NULL}, build_f4_if_nested, "if uvnitř then větve", "Y", {NULL}},
+    {"f4_if_nested_else", 4, "main", {NULL}, build_f4_if_nested_else,
+     "if uvnitř else větve a za ním další příkaz ve větvi", "Y!", {NULL}},
+    {"f4_if_nested_deep", 4, "main", {NULL}, build_f4_if_nested_deep, "tři if do sebe a za vnějším příkaz", "AB",
+     {NULL}},
+    {"f4_if_nested_both", 4, "main", {NULL}, build_f4_if_nested_both, "if jak ve then, tak v else větvi", "A",
+     {NULL}},
+    {"f4_else_if", 4, "main", {NULL}, build_f4_else_if, "if false A else if true B else C", "B", {NULL}},
+    {"f4_else_if_last", 4, "main", {NULL}, build_f4_else_if_last, "if false A else if false B else C", "C",
+     {NULL}},
+    {"f4_else_if_first", 4, "main", {NULL}, build_f4_else_if_first,
+     "if true A else if true B else C: else if se přeskočí", "A", {NULL}},
+    {"f4_else_if_chain", 4, "main", {NULL}, build_f4_else_if_chain,
+     "var x = 2; if x == 1 .. else if x == 2 .. else if x == 3 .. else", "B", {NULL}},
+    {"f4_else_if_no_else", 4, "main", {NULL}, build_f4_else_if_no_else,
+     "else if bez posledního else, nic neplatí, pokračuje se Z", "Z", {NULL}},
+    {"f4_if_var", 4, "main", {NULL}, build_f4_if_var, "var x = 5; if x > 3 { big } else { small }", "big",
+     {"LF@x$1", NULL}},
+    {"f4_if_var_else", 4, "main", {NULL}, build_f4_if_var_else, "var x = 1; if x > 3 { big } else { small }",
+     "small", {NULL}},
+    {"f4_if_assign", 4, "main", {NULL}, build_f4_if_assign, "var x = 1; if true { x = 2 }; print(x)", "2",
+     {NULL}},
+    {"f4_if_assign_skip", 4, "main", {NULL}, build_f4_if_assign_skip,
+     "var x = 1; if false { x = 3 }; print(x): zůstane 1", "1", {NULL}},
+    {"f4_if_assign_else", 4, "main", {NULL}, build_f4_if_assign_else,
+     "if 2 < 1 { x = 1 } else { x = 2 }; print(x)", "2", {NULL}},
+    {"f4_if_var_in_branch", 4, "main", {NULL}, build_f4_if_var_in_branch,
+     "val y a val z deklarované uvnitř větví (DEFVAR musí být nahoře)", "4", {"LF@y$1", "LF@z$2", NULL}},
+    {"f4_if_cond_expr", 4, "main", {NULL}, build_f4_if_cond_expr,
+     "podmínky jsou výrazy: (1 + 2) == 3 a 2 * 3 > 7", "AD", {NULL}},
+    {"f4_if_bool_var", 4, "main", {NULL}, build_f4_if_bool_var, "val b = true; if b { A } else { B }", "A", {NULL}},
+    {"f4_if_bool_var_cmp", 4, "main", {NULL}, build_f4_if_bool_var_cmp, "val b = 1 < 0; if b { A } else { B }", "B",
+     {NULL}},
+    {"f4_if_cmp_ops", 4, "main", {NULL}, build_f4_if_cmp_ops,
+     "<=, >= a != v podmínce (GTS+NOTS, LTS+NOTS, EQS+NOTS)", "ADF", {NULL}},
+    {"f4_if_string_cmp", 4, "main", {NULL}, build_f4_if_string_cmp,
+     "podmínka nad řetězci: \"a\" < \"b\", \"ab\" == \"ac\"", "AD", {NULL}},
+    {"f4_if_mixed", 4, "main", {NULL}, build_f4_if_mixed, "podmínka 2 < 2.5 (Int a Double, INT2FLOATS)", "A",
+     {NULL}},
+    {"f4_if_two_functions", 4, "main", {"helper", NULL}, build_f4_if_two_functions,
+     "if v main i v helper: návěští se nesmí shodovat", "x", {NULL}},
+    {"f4_if_helper_var", 4, "main", {"helper", NULL}, build_f4_if_helper_var,
+     "proměnná ve větvi ve druhé funkci (ta má mít vlastní DEFVAR)", "x", {"LF@h$1", "LF@k$2", NULL}},
+
+    {"f4_while_count", 4, "main", {NULL}, build_f4_while_count, "var i = 1; while i < 4 { print(i); i = i + 1 }",
+     "123", {NULL}},
+    {"f4_while_zero", 4, "main", {NULL}, build_f4_while_zero, "while false { X }; ok: tělo se nevykoná", "ok",
+     {NULL}},
+    {"f4_while_1_10", 4, "main", {NULL}, build_f4_while_1_10, "čísla 1 až 10 cyklem", "12345678910", {NULL}},
+    {"f4_while_sum", 4, "main", {NULL}, build_f4_while_sum, "s = 1 + 2 + 3 + 4 + 5 v cyklu", "15", {NULL}},
+    {"f4_while_countdown", 4, "main", {NULL}, build_f4_while_countdown, "while n > 0: 3 2 1", "321", {NULL}},
+    {"f4_while_neq", 4, "main", {NULL}, build_f4_while_neq, "while i != 3 (EQS a NOTS v podmínce)", "3", {NULL}},
+    {"f4_while_cond_expr", 4, "main", {NULL}, build_f4_while_cond_expr, "while i * i < 20: i skončí na 5", "5",
+     {NULL}},
+    {"f4_while_nested", 4, "main", {NULL}, build_f4_while_nested, "cyklus v cyklu: 11 12 21 22", "11122122",
+     {NULL}},
+    {"f4_while_if", 4, "main", {NULL}, build_f4_while_if, "if v těle cyklu: jen sudá čísla do 6", "246", {NULL}},
+    {"f4_if_while", 4, "main", {NULL}, build_f4_if_while, "while uvnitř then větve", "3", {NULL}},
+    {"f4_while_var_in_body", 4, "main", {NULL}, build_f4_while_var_in_body,
+     "val t uvnitř těla cyklu (DEFVAR musí být nahoře, ne v cyklu)", "246", {"LF@i$1", "LF@t$2", NULL}},
+    {"f4_while_two", 4, "main", {NULL}, build_f4_while_two, "dva while za sebou (návěští se nesmí opakovat)",
+     "0123", {NULL}},
+    {"f4_while_around", 4, "main", {NULL}, build_f4_while_around, "příkaz před cyklem i za ním", "<12>", {NULL}},
+    {"f4_while_string", 4, "main", {NULL}, build_f4_while_string,
+     "s = s + \"a\" v cyklu (pomocné proměnné pro CONCAT se použijí víckrát)", "aaa", {NULL}},
+    {"f4_while_helper", 4, "main", {"helper", NULL}, build_f4_while_helper,
+     "while v main i v helper: návěští se nesmí shodovat", "2", {"LF@i$1", "LF@k$2", NULL}},
+    {"f4_while_in_else", 4, "main", {NULL}, build_f4_while_in_else, "proměnná a cyklus uvnitř else větve", "01",
+     {"LF@i$1", NULL}},
+    {"f4_while_if_else", 4, "main", {NULL}, build_f4_while_if_else, "if else v těle cyklu: aabb", "aabb", {NULL}},
+    {"f4_while_double", 4, "main", {NULL}, build_f4_while_double, "x = 1.0; while x < 3.0 { x = x + 1.0 }",
+     "0x1.8p+1", {NULL}},
+    {"f4_while_mixed", 4, "main", {NULL}, build_f4_while_mixed, "while i < 2.5 (Int a Double v podmínce)", "3",
+     {NULL}},
+
+    {"f5_call_unit", 5, "main", {"hello", NULL}, build_f5_call_unit, "main volá hello(): Unit funkce, výsledek se zahodí",
+     "Hi", {NULL}},
+    {"f5_call_twice", 5, "main", {"hello", NULL}, build_f5_call_twice, "dvě volání téže funkce za sebou", "HiHi", {NULL}},
+    {"f5_call_chain", 5, "main", {"a", "b", NULL}, build_f5_call_chain, "main volá a, a volá b", "<b>", {NULL}},
+    {"f5_call_main_last", 5, "main", {"hello", NULL}, build_f5_call_main_last, "hello je definovaná před main", "Hi",
+     {NULL}},
+    {"f5_entry_run", 5, "run", {"hello", NULL}, build_f5_entry_run, "@main funkce se jmenuje run a volá hello", "Hi",
+     {NULL}},
+
+    {"f5_param_one", 5, "main", {"show", NULL}, build_f5_param_one, "show(42): jeden parametr", "42",
+     {"LF@x$1", NULL}},
+    {"f5_param_two", 5, "main", {"pdiff", NULL}, build_f5_param_two, "pdiff(10, 3) = 10 - 3: pořadí argumentů", "7",
+     {"LF@a$1", "LF@b$2", NULL}},
+    {"f5_param_types", 5, "main", {"show3", NULL}, build_f5_param_types, "show3(\"x\", 5, 2.5): tři parametry tří typů",
+     "x50x1.4p+1", {"LF@s$1", "LF@n$2", "LF@d$3"}},
+    {"f5_param_expr", 5, "main", {"pdiff", NULL}, build_f5_param_expr, "pdiff(1 + 2, 3 * 4): argumenty jsou výrazy", "-9",
+     {NULL}},
+    {"f5_param_vars", 5, "main", {"pdiff", NULL}, build_f5_param_vars, "val a = 10; val b = 4; pdiff(a, b)", "6", {NULL}},
+    {"f5_param_frames", 5, "main", {"show", NULL}, build_f5_param_frames,
+     "var x = 1; show(5); print(x): proměnná volajícího přežije volání", "51", {NULL}},
+    {"f5_param_concat", 5, "main", {"greet", NULL}, build_f5_param_concat,
+     "greet(\"Bob\"): spojení řetězců s parametrem ve volané funkci", "Hi Bob", {NULL}},
+    {"f5_param_loop", 5, "main", {"count", NULL}, build_f5_param_loop,
+     "count(3): parametr a lokální proměnná s cyklem", "123", {"LF@n$1", "LF@i$2", NULL}},
+    {"f5_param_if", 5, "main", {"sign", NULL}, build_f5_param_if, "sign(-3), sign(2): if nad parametrem", "negpos",
+     {NULL}},
+    {"f5_param_four", 5, "main", {"sum4", NULL}, build_f5_param_four, "sum4(1, 2, 3, 4) = 1234: čtyři parametry", "1234",
+     {NULL}},
+    {"f5_param_mixed", 5, "main", {"scale", NULL}, build_f5_param_mixed,
+     "scale(1.5, 2): Double a Int parametr, INT2FLOATS ve volané funkci", "0x1.8p+1", {NULL}},
+
+    {"f5_ret_int", 5, "main", {"twice", NULL}, build_f5_ret_int, "val r = twice(21): return x * 2", "42", {NULL}},
+    {"f5_ret_last", 5, "main", {"twice", NULL}, build_f5_ret_last, "hodnota z posledního výrazu těla, bez return", "42",
+     {NULL}},
+    {"f5_ret_last_call", 5, "main", {"wrapper", "twice", NULL}, build_f5_ret_last_call,
+     "poslední výraz těla je volání jiné funkce", "8", {NULL}},
+    {"f5_ret_last_after", 5, "main", {"incr", NULL}, build_f5_ret_last_after,
+     "příkaz print(v) a za ním poslední výraz x + 1", "v2", {NULL}},
+    {"f5_ret_string", 5, "main", {"greeting", NULL}, build_f5_ret_string, "funkce vrací String", "Hi Ann", {NULL}},
+    {"f5_ret_double", 5, "main", {"half", NULL}, build_f5_ret_double, "funkce vrací Double: half(5.0)", "0x1.4p+1",
+     {NULL}},
+    {"f5_ret_bool", 5, "main", {"isPos", NULL}, build_f5_ret_bool, "funkce vrací Boolean: isPos(3), isPos(-1)",
+     "truefalse", {NULL}},
+    {"f5_ret_early", 5, "main", {"abs", NULL}, build_f5_ret_early, "return uvnitř if: abs(-5), abs(7)", "57", {NULL}},
+    {"f5_ret_early_unit", 5, "main", {"check", NULL}, build_f5_ret_early_unit,
+     "prázdný return v Unit funkci (vrací nil@nil)", "posneg", {NULL}},
+    {"f5_ret_in_loop", 5, "main", {"firstOver", NULL}, build_f5_ret_in_loop,
+     "return uvnitř while uvnitř if: firstOver(50) = 8", "8", {NULL}},
+    {"f5_ret_two_calls", 5, "main", {"twice", NULL}, build_f5_ret_two_calls, "a = twice(5), b = twice(6), print(a + b)",
+     "22", {NULL}},
+    {"f5_ret_discard", 5, "main", {"twice", NULL}, build_f5_ret_discard,
+     "twice(5) jako příkaz: vrácená hodnota se zahodí", "ok", {NULL}},
+    {"f5_call_in_loop", 5, "main", {"show", NULL}, build_f5_call_in_loop, "volání uvnitř while: zásobník se nehromadí",
+     "123", {NULL}},
+    {"f5_call_in_if", 5, "main", {"show", NULL}, build_f5_call_in_if, "volání ve větvích if", "14", {NULL}},
+
+    {"f5_fact", 5, "main", {"fact", NULL}, build_f5_fact, "rekurzivní faktoriál: fact(5)", "120",
+     {"LF@n$1", "LF@m$2", "LF@r$3"}},
+    {"f5_fact_10", 5, "main", {"fact", NULL}, build_f5_fact_10, "fact(10): hloubka rekurze 10", "3628800", {NULL}},
+    {"f5_fib", 5, "main", {"fib", NULL}, build_f5_fib, "fib(10) = 55: dvě rekurzivní volání v těle", "55", {NULL}},
+    {"f5_sum_rec", 5, "main", {"sumTo", NULL}, build_f5_sum_rec, "sumTo(20) = 210: hloubka rekurze 20", "210", {NULL}},
+    {"f5_countdown", 5, "main", {"countdown", NULL}, build_f5_countdown,
+     "rekurze v Unit funkci s voláním jako příkazem: countdown(3)", "321", {NULL}},
+    {"f5_mutual", 5, "main", {"isEven", "isOdd", NULL}, build_f5_mutual,
+     "vzájemná rekurze isEven a isOdd (volání funkce definované později)", "truefalse", {NULL}},
+    {"f6_strlen", 6, "main", {NULL}, build_f6_strlen,
+     "strLength(\"Ahoj\") = 4", "4", {NULL}, NULL, 0},
+    {"f6_strlen_empty", 6, "main", {NULL}, build_f6_strlen_empty,
+     "strLength(\"\") = 0", "0", {NULL}, NULL, 0},
+    {"f6_strlen_var", 6, "main", {NULL}, build_f6_strlen_var,
+     "strLength nad proměnnou", "5", {NULL}, NULL, 0},
+    {"f6_strlen_special", 6, "main", {NULL}, build_f6_strlen_special,
+     "strLength(\"a b\\nc\"): mezera a nový řádek se počítají", "5", {NULL}, NULL, 0},
+    {"f6_toint", 6, "main", {NULL}, build_f6_toint,
+     "toInt(3.99) = 3, toInt(-2.7) = -2 (osekne, nezaokrouhluje)", "3-2", {NULL}, NULL, 0},
+    {"f6_toint_var", 6, "main", {NULL}, build_f6_toint_var,
+     "toInt nad proměnnou Double: 7.5 -> 7", "7", {NULL}, NULL, 0},
+    {"f6_chr", 6, "main", {NULL}, build_f6_chr,
+     "chr(72), chr(105) = Hi", "Hi", {NULL}, NULL, 0},
+    {"f6_chr_edges", 6, "main", {NULL}, build_f6_chr_edges,
+     "chr(10) je nový řádek, chr(127) má délku 1", "\n1", {NULL}, NULL, 0},
+    {"f6_ord", 6, "main", {NULL}, build_f6_ord,
+     "ord(\"A\", 0) = 65, ord(\"abc\", 2) = 99", "6599", {NULL}, NULL, 0},
+    {"f6_ord_out", 6, "main", {NULL}, build_f6_ord_out,
+     "ord mimo řetězec nebo nad prázdným řetězcem = -1", "-1-1-1", {NULL}, NULL, 0},
+    {"f6_ord_var", 6, "main", {NULL}, build_f6_ord_var,
+     "ord(s, i) s proměnnými: ord(\"xyz\", 1) = 121", "121", {NULL}, NULL, 0},
+    {"f6_substr", 6, "main", {NULL}, build_f6_substr,
+     "subStr(\"abcdef\", 1, 4) = bcd", "bcd", {NULL}, NULL, 0},
+    {"f6_substr_full", 6, "main", {NULL}, build_f6_substr_full,
+     "subStr(\"abc\", 0, 3): celý řetězec", "abc", {NULL}, NULL, 0},
+    {"f6_substr_last", 6, "main", {NULL}, build_f6_substr_last,
+     "subStr(\"abc\", 2, 3): poslední znak", "c", {NULL}, NULL, 0},
+    {"f6_substr_empty", 6, "main", {NULL}, build_f6_substr_empty,
+     "subStr(\"abc\", 1, 1): prázdný řetězec, ne chyba", "<>", {NULL}, NULL, 0},
+    {"f6_substr_var", 6, "main", {NULL}, build_f6_substr_var,
+     "subStr s proměnnými: Hello World od 6 do 11", "World", {NULL}, NULL, 0},
+    {"f6_substr_two", 6, "main", {NULL}, build_f6_substr_two,
+     "dvě volání subStr s různými mezemi: ab a def", "abdef", {NULL}, NULL, 0},
+    {"f6_tostr_int", 6, "main", {NULL}, build_f6_tostr_int,
+     "toStr(42), toStr(-7)", "42-7", {NULL}, NULL, 0},
+    {"f6_tostr_double", 6, "main", {NULL}, build_f6_tostr_double,
+     "toStr(2.5) = 2.50, toStr(3.14159) = 3.14 (%.2f, ne %a)", "2.503.14", {NULL}, NULL, 0},
+    {"f6_tostr_double_neg", 6, "main", {NULL}, build_f6_tostr_double_neg,
+     "toStr(-1.5), toStr(0.0), toStr(100.0)", "-1.500.00100.00", {NULL}, NULL, 0},
+    {"f6_tostr_string", 6, "main", {NULL}, build_f6_tostr_string,
+     "toStr(\"abc\") = abc", "abc", {NULL}, NULL, 0},
+    {"f6_tostr_var", 6, "main", {NULL}, build_f6_tostr_var,
+     "toStr(n) a spojení s textem: n=12", "n=12", {NULL}, NULL, 0},
+    {"f6_tostr_vars", 6, "main", {NULL}, build_f6_tostr_vars,
+     "toStr nad proměnnou Int, Double i String", "50.50t", {NULL}, NULL, 0},
+    {"f6_twice_same", 6, "main", {NULL}, build_f6_twice_same,
+     "stejné vestavěné funkce víckrát: každá se definuje jednou", "2132", {NULL}, NULL, 0},
+    {"f6_all", 6, "main", {NULL}, build_f6_all,
+     "subStr, strLength, ord, chr, toStr a toInt v jednom programu", "3101e39", {NULL}, NULL, 0},
+    {"f6_loop", 6, "main", {NULL}, build_f6_loop,
+     "vestavěné funkce v cyklu: každý znak hello o jedna dál", "ifmmp", {NULL}, NULL, 0},
+    {"f6_in_func", 6, "main", {NULL}, build_f6_in_func,
+     "uživatelská funkce vrací výsledek strLength (return)", "4", {NULL}, NULL, 0},
+    {"f6_in_func_last", 6, "main", {NULL}, build_f6_in_func_last,
+     "uživatelská funkce vrací strLength jako poslední výraz", "4", {NULL}, NULL, 0},
+    {"f6_discard", 6, "main", {NULL}, build_f6_discard,
+     "vestavěná funkce jako příkaz: výsledek se zahodí", "ok", {NULL}, NULL, 0},
+    {"f6_nested", 6, "main", {NULL}, build_f6_nested,
+     "print(toStr(strLength(subStr(\"abcd\", 1, 3)))) = 2 (FUNEXP)", "2", {NULL}, NULL, 0},
+    {"f6_nested_user", 6, "main", {"show", NULL}, build_f6_nested_user,
+     "show(strLength(\"abc\")): vestavěné volání jako argument (FUNEXP)", "3", {NULL}, NULL, 0},
+    {"f6_nested_expr", 6, "main", {NULL}, build_f6_nested_expr,
+     "strLength(\"ab\") + strLength(\"cde\") * 2 = 8 (FUNEXP)", "8", {NULL}, NULL, 0},
+    {"f6_nested_args", 6, "main", {NULL}, build_f6_nested_args,
+     "subStr(\"abcdef\", ord(\"A\", 0) - 64, 4) = bcd (FUNEXP)", "bcd", {NULL}, NULL, 0},
+    {"f6_substr_neg_start", 6, "main", {NULL}, build_f6_substr_neg_start,
+     "subStr(\"abc\", -1, 2): start < 0 -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_substr_neg_end", 6, "main", {NULL}, build_f6_substr_neg_end,
+     "subStr(\"abc\", 1, -1): end < 0 -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_substr_start_gt_end", 6, "main", {NULL}, build_f6_substr_start_gt_end,
+     "subStr(\"abc\", 2, 1): start > end -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_substr_start_len", 6, "main", {NULL}, build_f6_substr_start_len,
+     "subStr(\"abc\", 3, 3): start >= délka -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_substr_end_len", 6, "main", {NULL}, build_f6_substr_end_len,
+     "subStr(\"abc\", 0, 4): end > délka -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_substr_empty_str", 6, "main", {NULL}, build_f6_substr_empty_str,
+     "subStr(\"\", 0, 0): start >= délka -> kód 40", "a", {NULL}, NULL, 40},
+    {"f6_chr_big", 6, "main", {NULL}, build_f6_chr_big,
+     "chr(128): mimo 0 až 127 -> chyba interpretu 58", "a", {NULL}, NULL, 58},
+    {"f6_chr_neg", 6, "main", {NULL}, build_f6_chr_neg,
+     "chr(-1): mimo 0 až 127 -> chyba interpretu 58", "a", {NULL}, NULL, 58},
+    {"f6_div_zero", 6, "main", {NULL}, build_f6_div_zero,
+     "1 / 0 u Int: dělení nulou se neošetřuje, interpret skončí kódem 57", "a", {NULL}, NULL, 57},
+    {"f6_readint", 6, "main", {NULL}, build_f6_readint,
+     "readInt() přečte 42", "42", {NULL}, "42\n", 0},
+    {"f6_readint_calc", 6, "main", {NULL}, build_f6_readint_calc,
+     "dvě čísla na dvou řádcích: 20 + 22", "42", {NULL}, "20\n22\n", 0},
+    {"f6_readint_neg", 6, "main", {NULL}, build_f6_readint,
+     "readInt(): záporné číslo -12", "-12", {NULL}, "-12\n", 0},
+    {"f6_readint_nonl", 6, "main", {NULL}, build_f6_readint,
+     "readInt(): poslední řádek bez nového řádku", "7", {NULL}, "7", 0},
+    {"f6_readint_bad", 6, "main", {NULL}, build_f6_readint,
+     "readInt() z \"abc\": 0", "0", {NULL}, "abc\n", 0},
+    {"f6_readint_eof", 6, "main", {NULL}, build_f6_readint,
+     "readInt() na konci vstupu: 0 (READ vrací nil, to se musí změnit)", "0", {NULL}, "", 0},
+    {"f6_readint_space", 6, "main", {NULL}, build_f6_readint,
+     "readInt() z \" 5\": okolní bílé znaky se neignorují, 0", "0", {NULL}, " 5\n", 0},
+    {"f6_readint_real", 6, "main", {NULL}, build_f6_readint,
+     "readInt() z \"3.5\": není to Int, 0", "0", {NULL}, "3.5\n", 0},
+    {"f6_readdouble", 6, "main", {NULL}, build_f6_readdouble,
+     "readDouble() přečte 3.5", "0x1.cp+1", {NULL}, "3.5\n", 0},
+    {"f6_readdouble_int", 6, "main", {NULL}, build_f6_readdouble,
+     "readDouble() z \"2\": platné číslo, 2.0", "0x1p+1", {NULL}, "2\n", 0},
+    {"f6_readdouble_bad", 6, "main", {NULL}, build_f6_readdouble,
+     "readDouble() z \"x\": 0.0", "0x0p+0", {NULL}, "x\n", 0},
+    {"f6_readdouble_eof", 6, "main", {NULL}, build_f6_readdouble,
+     "readDouble() na konci vstupu: 0.0", "0x0p+0", {NULL}, "", 0},
+    {"f6_readline", 6, "main", {NULL}, build_f6_readline,
+     "dva readLine: řádky včetně nového řádku", "hello\nworld\n", {NULL}, "hello\nworld\n", 0},
+    {"f6_readline_eof", 6, "main", {NULL}, build_f6_readline_brackets,
+     "readLine() na konci vstupu: prázdný řetězec", "<>", {NULL}, "", 0},
+    {"f6_readline_nonl", 6, "main", {NULL}, build_f6_readline_brackets,
+     "readLine() posledního řádku bez nového řádku", "<last>", {NULL}, "last", 0},
+    {"f6_readline_empty", 6, "main", {NULL}, build_f6_readline_brackets,
+     "readLine() z prázdného řádku: jen \\n", "<\n>", {NULL}, "\n", 0},
+    {"f6_read_mixed", 6, "main", {NULL}, build_f6_read_mixed,
+     "readInt, readLine, readDouble za sebou", "5abc\n0x1.4p+1", {NULL}, "5\nabc\n2.5\n", 0},
+    {"f6_read_loop", 6, "main", {NULL}, build_f6_read_loop,
+     "readInt v cyklu: n a pak n čísel, součet 60", "60", {NULL}, "3\n10\n20\n30\n", 0},
+    {"f6_read_discard", 6, "main", {NULL}, build_f6_read_discard,
+     "readInt() jako příkaz zahodí první řádek, vypíše se druhý", "2", {NULL}, "1\n2\n", 0},
+    {"f6_read_func", 6, "main", {"sum2", NULL}, build_f6_read_func,
+     "čtení uvnitř uživatelské funkce: 3 + 4", "7", {NULL}, "3\n4\n", 0},
 };
 #define N_CASES (sizeof CASES / sizeof CASES[0])
 
@@ -668,12 +1905,22 @@ static const struct {
   const char *op;
   int args;
 } OPS[] = {
-    {"CREATEFRAME", 0}, {"PUSHFRAME", 0}, {"POPFRAME", 0}, {"RETURN", 0}, {"CLEARS", 0},
+    {"CREATEFRAME", 0}, {"PUSHFRAME", 0}, {"POPFRAME", 0}, {"RETURN", 0}, {"CLEARS", 0}, {"BREAK", 0},
     {"CALL", 1},        {"LABEL", 1},     {"EXIT", 1},     {"PUSHS", 1},  {"POPS", 1},
-    {"WRITE", 1},       {"DEFVAR", 1},    {"JUMP", 1},     {"MOVE", 2},
+    {"WRITE", 1},       {"DEFVAR", 1},    {"JUMP", 1},     {"DPRINT", 1},
+    {"MOVE", 2},        {"INT2FLOAT", 2}, {"FLOAT2INT", 2}, {"INT2CHAR", 2}, {"FLOAT2STR", 2},
+    {"INT2STR", 2},     {"READ", 2},      {"STRLEN", 2},   {"NOT", 2},    {"TYPE", 2},
+    {"ISINT", 2},       {"NEWARRAY", 2},
+    {"ADD", 3},         {"SUB", 3},       {"MUL", 3},      {"DIV", 3},    {"IDIV", 3},
+    {"LT", 3},          {"GT", 3},        {"EQ", 3},       {"AND", 3},    {"OR", 3},
+    {"STRI2INT", 3},    {"CONCAT", 3},    {"GETCHAR", 3},  {"SETCHAR", 3}, {"ARRAYGET", 3},
+    {"ARRAYSET", 3},
     {"ADDS", 0},        {"SUBS", 0},      {"MULS", 0},
     {"IDIVS", 0},       {"DIVS", 0},      {"LTS", 0},      {"GTS", 0},    {"EQS", 0},
-    {"NOTS", 0},        {"INT2FLOATS", 0}, {"CONCAT", 3},
+    {"NOTS", 0},        {"ANDS", 0},      {"ORS", 0},      {"INT2FLOATS", 0}, {"FLOAT2INTS", 0},
+    {"INT2CHARS", 0},   {"STRI2INTS", 0}, {"FLOAT2STRS", 0}, {"INT2STRS", 0}, {"TYPES", 0},
+    {"ISINTS", 0},
+    {"JUMPIFEQS", 1},   {"JUMPIFNEQS", 1}, {"JUMPIFEQ", 3}, {"JUMPIFNEQ", 3},
 };
 #define N_OPS (sizeof OPS / sizeof OPS[0])
 
@@ -692,8 +1939,14 @@ static int split_words(const char *line, char *buf, size_t bufsz, char *words[8]
   return n;
 }
 
+/* Je první slovo řádku (instrukce) právě `word`? */
+static bool first_word_is(const char *line, const char *word) {
+  char buf[1024], *w[8];
+  return split_words(line, buf, sizeof buf, w) >= 1 && strcmp(w[0], word) == 0;
+}
+
 /* ------------------------------------------------------------------------- */
-/*  Simulátor IFJcode26 (instrukce pro fáze 0 až 3)                          */
+/*  Simulátor IFJcode26 (instrukce pro fáze 0 až 4)                          */
 /* ------------------------------------------------------------------------- */
 
 typedef enum { V_NONE, V_INT, V_FLOAT, V_BOOL, V_STR, V_NIL } VType;
@@ -730,6 +1983,9 @@ typedef struct {
   int nmem;
   char err[300];
   int exit_code;
+  const char *in; /* standardní vstup programu a pozice, odkud se čte dál */
+  size_t inpos;
+  char rt_msg[300]; /* běhová chyba interpretu (kód 57 nebo 58): program skončí s tímto kódem */
 } Vm;
 
 static void *vm_alloc(Vm *vm, size_t n) {
@@ -893,14 +2149,181 @@ static void write_val(Vm *vm, const Val *v) {
   }
 }
 
+/* Rovnost hodnot jako u JUMPIFEQ / JUMPIFEQS: stejné typy, nebo nil s čímkoli (pak jen nil == nil). */
+static bool values_equal(Vm *vm, const Val *a, const Val *b, int ln, const char *op, bool *eq) {
+  if (a->t == V_NIL || b->t == V_NIL) {
+    *eq = (a->t == b->t);
+    return true;
+  }
+  if (a->t != b->t) {
+    vm_fail(vm, "řádek %d: %s porovnává hodnoty různého typu (chyba 53). Podmínka dává Boolean, takže se "
+                "má porovnávat s bool@false (ne s číslem nebo řetězcem)", ln, op);
+    return false;
+  }
+  switch (a->t) {
+    case V_INT:
+    case V_BOOL:
+      *eq = a->i == b->i;
+      break;
+    case V_FLOAT:
+      *eq = a->d == b->d;
+      break;
+    case V_STR:
+      *eq = a->n == b->n && memcmp(a->s, b->s, a->n) == 0;
+      break;
+    default:
+      *eq = false;
+  }
+  return true;
+}
+
+
+/* Běhová chyba interpretu, kterou smí případ očekávat (57, 58): program skončí s tímto kódem. */
+static void vm_rt(Vm *vm, int code, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void vm_rt(Vm *vm, int code, const char *fmt, ...) {
+  if (vm->rt_msg[0]) return;
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(vm->rt_msg, sizeof vm->rt_msg, fmt, ap);
+  va_end(ap);
+  vm->exit_code = code;
+}
+
+static Val str_val(Vm *vm, const char *p, size_t n) {
+  char *buf = vm_alloc(vm, n + 1);
+  memcpy(buf, p, n);
+  Val v;
+  memset(&v, 0, sizeof v);
+  v.t = V_STR;
+  v.s = buf;
+  v.n = n;
+  return v;
+}
+
+/* Převod jednoho operandu: INT2FLOAT, FLOAT2INT, INT2CHAR, FLOAT2STR, INT2STR (název bez S na konci).
+ * Vrací false, když chyba skončila program (vm->err nebo vm->rt_msg je nastavené). */
+static bool conv_val(Vm *vm, const char *base, const Val *a, Val *r, int ln) {
+  memset(r, 0, sizeof *r);
+  char tmp[64];
+  if (strcmp(base, "INT2FLOAT") == 0 || strcmp(base, "INT2CHAR") == 0 || strcmp(base, "INT2STR") == 0) {
+    if (a->t != V_INT) {
+      vm_fail(vm, "řádek %d: %s chce hodnotu typu int (chyba 53)", ln, base);
+      return false;
+    }
+    if (strcmp(base, "INT2FLOAT") == 0) {
+      r->t = V_FLOAT;
+      r->d = (double)a->i;
+    } else if (strcmp(base, "INT2STR") == 0) {
+      *r = str_val(vm, tmp, (size_t)snprintf(tmp, sizeof tmp, "%lld", a->i));
+      memcpy((char *)r->s, tmp, r->n);
+    } else {
+      if (a->i < 0 || a->i > 127) {
+        vm_rt(vm, 58, "řádek %d: INT2CHAR s hodnotou %lld mimo 0 až 127 (chyba 58)", ln, a->i);
+        return false;
+      }
+      *r = str_val(vm, tmp, 1);
+      ((char *)r->s)[0] = (char)a->i;
+    }
+    return true;
+  }
+  if (a->t != V_FLOAT) {
+    vm_fail(vm, "řádek %d: %s chce hodnotu typu float (chyba 53)", ln, base);
+    return false;
+  }
+  if (strcmp(base, "FLOAT2INT") == 0) {
+    r->t = V_INT;
+    r->i = (long long)a->d;
+  } else {
+    *r = str_val(vm, tmp, (size_t)snprintf(tmp, sizeof tmp, "%.2f", a->d));
+    memcpy((char *)r->s, tmp, r->n);
+  }
+  return true;
+}
+
+/* LT, GT, EQ: výsledek relace dvou hodnot stejného typu (nil jen u EQ). */
+static bool rel_eval(Vm *vm, char kind, const char *opname, const Val *a, const Val *b, int ln, bool *res) {
+  if (a->t == V_NIL || b->t == V_NIL) {
+    if (kind != 'E') {
+      vm_fail(vm, "řádek %d: %s s operandem nil (chyba 53)", ln, opname);
+      return false;
+    }
+    *res = (a->t == b->t);
+    return true;
+  }
+  if (a->t != b->t) {
+    vm_fail(vm, "řádek %d: %s má operandy různého typu (chyba 53)", ln, opname);
+    return false;
+  }
+  int cmp = 0;
+  if (a->t == V_INT || a->t == V_BOOL)
+    cmp = (a->i > b->i) - (a->i < b->i);
+  else if (a->t == V_FLOAT)
+    cmp = (a->d > b->d) - (a->d < b->d);
+  else if (a->t == V_STR) {
+    size_t m = a->n < b->n ? a->n : b->n;
+    cmp = memcmp(a->s, b->s, m);
+    if (cmp == 0) cmp = (a->n > b->n) - (a->n < b->n);
+  }
+  *res = kind == 'L' ? cmp < 0 : kind == 'G' ? cmp > 0 : cmp == 0;
+  return true;
+}
+
+/* READ: jeden řádek vstupu podle typu. String vrací řádek včetně \n (na konci vstupu ""), int a float
+ * vrací nil při chybném zápisu nebo na konci vstupu (celý řádek musí být platné číslo, bez mezer). */
+static bool read_input(Vm *vm, const char *type, Val *r, int ln) {
+  memset(r, 0, sizeof *r);
+  const char *in = vm->in ? vm->in : "";
+  size_t len = strlen(in), st = vm->inpos, e = st;
+  while (e < len && in[e] != '\n') e++;
+  size_t line_end = e;
+  if (e < len) e++; /* včetně \n */
+  if (strcmp(type, "string") == 0) {
+    *r = str_val(vm, in + st, e - st);
+    vm->inpos = e;
+    return true;
+  }
+  bool is_int = strcmp(type, "int") == 0, is_float = strcmp(type, "float") == 0;
+  if (!is_int && !is_float) {
+    vm_fail(vm, "řádek %d: READ s typem \"%s\" simulátor v testu neumí", ln, type);
+    return false;
+  }
+  if (st >= len) { /* konec vstupu */
+    r->t = V_NIL;
+    return true;
+  }
+  vm->inpos = e;
+  r->t = V_NIL;
+  size_t n = line_end - st;
+  if (n == 0 || n > 60 || isspace((unsigned char)in[st])) return true;
+  char tmp[64];
+  memcpy(tmp, in + st, n);
+  tmp[n] = '\0';
+  char *end;
+  errno = 0;
+  if (is_int) {
+    long long v = strtoll(tmp, &end, 10);
+    if (*end == '\0' && errno == 0) {
+      r->t = V_INT;
+      r->i = v;
+    }
+  } else {
+    double d = strtod(tmp, &end);
+    if (*end == '\0' && errno == 0 && !isnan(d) && !isinf(d) && !strpbrk(tmp, "nNiI")) {
+      r->t = V_FLOAT;
+      r->d = d;
+    }
+  }
+  return true;
+}
+
 /* Spustí program (řádky 0..n-1, řádek 0 je hlavička). Při chybě nastaví vm->err. */
 static void vm_run(Vm *vm, char **lines, int n) {
   /* návěští */
-  const char *lab[128];
-  int labline[128], nlab = 0;
+  const char *lab[256];
+  int labline[256], nlab = 0;
   for (int i = 1; i < n; i++) {
     char buf[1024], *w[8];
-    if (split_words(lines[i], buf, sizeof buf, w) >= 2 && strcmp(w[0], "LABEL") == 0 && nlab < 128) {
+    if (split_words(lines[i], buf, sizeof buf, w) >= 2 && strcmp(w[0], "LABEL") == 0 && nlab < 256) {
       char *dup = vm_alloc(vm, strlen(w[1]) + 1);
       strcpy(dup, w[1]);
       lab[nlab] = dup;
@@ -910,8 +2333,8 @@ static void vm_run(Vm *vm, char **lines, int n) {
 
   int pc = 1;
   for (int steps = 0; pc < n; steps++) {
-    if (steps > 20000) {
-      vm_fail(vm, "program se zacyklil (víc než 20000 instrukcí)");
+    if (steps > 100000) {
+      vm_fail(vm, "program se zacyklil (víc než 100000 instrukcí)");
       return;
     }
     char buf[1024], *w[8];
@@ -943,6 +2366,34 @@ static void vm_run(Vm *vm, char **lines, int n) {
         vm->ret[vm->nret++] = pc;
       }
       pc = target + 1;
+    } else if (((strcmp(op, "JUMPIFEQS") == 0 || strcmp(op, "JUMPIFNEQS") == 0) && nw == 2) ||
+               ((strcmp(op, "JUMPIFEQ") == 0 || strcmp(op, "JUMPIFNEQ") == 0) && nw == 4)) {
+      bool stack_form = op[strlen(op) - 1] == 'S';
+      bool want_eq = op[6] == 'E'; /* JUMPIFEQ.. skočí při rovnosti, JUMPIFNEQ.. při nerovnosti */
+      Val a, b;
+      if (stack_form) {
+        if (vm->nst < 2) {
+          vm_fail(vm, "řádek %d: %s potřebuje dvě hodnoty na zásobníku (chyba 56). Před skokem má na "
+                      "zásobníku být výsledek podmínky a k němu bool@false", ln, op);
+          return;
+        }
+        b = vm->st[--vm->nst];
+        a = vm->st[--vm->nst];
+      } else if (!read_symb(vm, w[2], ln, &a) || !read_symb(vm, w[3], ln, &b)) {
+        return;
+      }
+      bool eq = false;
+      if (!values_equal(vm, &a, &b, ln, op, &eq)) return;
+      if (eq == want_eq) {
+        int target = -1;
+        for (int k = 0; k < nlab; k++)
+          if (strcmp(lab[k], w[1]) == 0) target = labline[k];
+        if (target < 0) {
+          vm_fail(vm, "řádek %d: skok na neexistující návěští \"%s\" (chyba 52)", ln, w[1]);
+          return;
+        }
+        pc = target + 1;
+      }
     } else if (strcmp(op, "RETURN") == 0) {
       if (vm->nret == 0) {
         vm_fail(vm, "řádek %d: RETURN bez volání CALL (chyba 56)", ln);
@@ -1014,6 +2465,14 @@ static void vm_run(Vm *vm, char **lines, int n) {
     } else if (strcmp(op, "EXIT") == 0 && nw == 2) {
       Val x;
       if (!read_symb(vm, w[1], ln, &x)) return;
+      if (x.t != V_INT) {
+        vm_fail(vm, "řádek %d: EXIT chce celé číslo (chyba 53)", ln);
+        return;
+      }
+      if (x.i < 0 || x.i > 49) {
+        vm_rt(vm, 57, "řádek %d: EXIT s hodnotou %lld mimo 0 až 49 (chyba 57)", ln, x.i);
+        return;
+      }
       vm->exit_code = (int)x.i;
       return;
     } else if ((strcmp(op, "ADDS") == 0 || strcmp(op, "SUBS") == 0 || strcmp(op, "MULS") == 0) &&
@@ -1049,7 +2508,7 @@ static void vm_run(Vm *vm, char **lines, int n) {
           return;
         }
         if (b.i == 0) {
-          vm_fail(vm, "řádek %d: dělení nulou (chyba 57)", ln);
+          vm_rt(vm, 57, "řádek %d: dělení nulou (chyba 57)", ln);
           return;
         }
         r.t = V_INT;
@@ -1137,6 +2596,162 @@ static void vm_run(Vm *vm, char **lines, int n) {
       v->v.s = buf;
       v->v.n = x.n + y.n;
       v->init = true;
+    } else if ((strcmp(op, "ADD") == 0 || strcmp(op, "SUB") == 0 || strcmp(op, "MUL") == 0 ||
+                strcmp(op, "DIV") == 0 || strcmp(op, "IDIV") == 0) && nw == 4) {
+      Val a, b, r;
+      if (!read_symb(vm, w[2], ln, &a) || !read_symb(vm, w[3], ln, &b)) return;
+      memset(&r, 0, sizeof r);
+      if (op[0] == 'I' || strcmp(op, "DIV") == 0) {
+        bool is_idiv = op[0] == 'I';
+        if (a.t != (is_idiv ? V_INT : V_FLOAT) || b.t != a.t) {
+          vm_fail(vm, "řádek %d: %s chce dva operandy typu %s (chyba 53)", ln, op, is_idiv ? "int" : "float");
+          return;
+        }
+        if ((is_idiv && b.i == 0) || (!is_idiv && b.d == 0.0)) {
+          vm_rt(vm, 57, "řádek %d: dělení nulou (chyba 57)", ln);
+          return;
+        }
+        if (is_idiv) {
+          r.t = V_INT;
+          r.i = (b.i == -1) ? (long long)(0ULL - (unsigned long long)a.i) : a.i / b.i;
+        } else {
+          r.t = V_FLOAT;
+          r.d = a.d / b.d;
+        }
+      } else if (a.t == V_INT && b.t == V_INT) {
+        unsigned long long ua = (unsigned long long)a.i, ub = (unsigned long long)b.i;
+        r.t = V_INT;
+        r.i = (long long)(op[0] == 'A' ? ua + ub : op[0] == 'S' ? ua - ub : ua * ub);
+      } else if (a.t == V_FLOAT && b.t == V_FLOAT) {
+        r.t = V_FLOAT;
+        r.d = op[0] == 'A' ? a.d + b.d : op[0] == 'S' ? a.d - b.d : a.d * b.d;
+      } else {
+        vm_fail(vm, "řádek %d: %s má operandy různého nebo nevhodného typu (chyba 53)", ln, op);
+        return;
+      }
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      v->v = r;
+      v->init = true;
+    } else if ((strcmp(op, "LT") == 0 || strcmp(op, "GT") == 0 || strcmp(op, "EQ") == 0) && nw == 4) {
+      Val a, b, r;
+      bool res = false;
+      if (!read_symb(vm, w[2], ln, &a) || !read_symb(vm, w[3], ln, &b)) return;
+      if (!rel_eval(vm, op[0], op, &a, &b, ln, &res)) return;
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      memset(&r, 0, sizeof r);
+      r.t = V_BOOL;
+      r.i = res;
+      v->v = r;
+      v->init = true;
+    } else if ((strcmp(op, "AND") == 0 || strcmp(op, "OR") == 0) && nw == 4) {
+      Val a, b, r;
+      if (!read_symb(vm, w[2], ln, &a) || !read_symb(vm, w[3], ln, &b)) return;
+      if (a.t != V_BOOL || b.t != V_BOOL) {
+        vm_fail(vm, "řádek %d: %s chce dva operandy typu bool (chyba 53)", ln, op);
+        return;
+      }
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      memset(&r, 0, sizeof r);
+      r.t = V_BOOL;
+      r.i = op[0] == 'A' ? (a.i && b.i) : (a.i || b.i);
+      v->v = r;
+      v->init = true;
+    } else if (strcmp(op, "NOT") == 0 && nw == 3) {
+      Val a, r;
+      if (!read_symb(vm, w[2], ln, &a)) return;
+      if (a.t != V_BOOL) {
+        vm_fail(vm, "řádek %d: NOT chce operand typu bool (chyba 53)", ln);
+        return;
+      }
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      memset(&r, 0, sizeof r);
+      r.t = V_BOOL;
+      r.i = !a.i;
+      v->v = r;
+      v->init = true;
+    } else if ((strcmp(op, "INT2FLOAT") == 0 || strcmp(op, "FLOAT2INT") == 0 || strcmp(op, "INT2CHAR") == 0 ||
+                strcmp(op, "FLOAT2STR") == 0 || strcmp(op, "INT2STR") == 0) && nw == 3) {
+      Val a, r;
+      if (!read_symb(vm, w[2], ln, &a)) return;
+      if (!conv_val(vm, op, &a, &r, ln)) return;
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      v->v = r;
+      v->init = true;
+    } else if ((strcmp(op, "FLOAT2INTS") == 0 || strcmp(op, "INT2CHARS") == 0 || strcmp(op, "FLOAT2STRS") == 0 ||
+                strcmp(op, "INT2STRS") == 0) && nw == 1) {
+      if (vm->nst < 1) {
+        vm_fail(vm, "řádek %d: %s potřebuje hodnotu na zásobníku (chyba 56)", ln, op);
+        return;
+      }
+      char base[16];
+      snprintf(base, sizeof base, "%.*s", (int)strlen(op) - 1, op);
+      Val r;
+      if (!conv_val(vm, base, &vm->st[vm->nst - 1], &r, ln)) return;
+      vm->st[vm->nst - 1] = r;
+    } else if ((strcmp(op, "ANDS") == 0 || strcmp(op, "ORS") == 0) && nw == 1) {
+      if (vm->nst < 2) {
+        vm_fail(vm, "řádek %d: %s potřebuje dvě hodnoty na zásobníku (chyba 56)", ln, op);
+        return;
+      }
+      Val b = vm->st[--vm->nst], a = vm->st[--vm->nst], r;
+      if (a.t != V_BOOL || b.t != V_BOOL) {
+        vm_fail(vm, "řádek %d: %s chce dva operandy typu bool (chyba 53)", ln, op);
+        return;
+      }
+      memset(&r, 0, sizeof r);
+      r.t = V_BOOL;
+      r.i = op[0] == 'A' ? (a.i && b.i) : (a.i || b.i);
+      vm->st[vm->nst++] = r;
+    } else if (strcmp(op, "CLEARS") == 0 && nw == 1) {
+      vm->nst = 0;
+    } else if (strcmp(op, "STRLEN") == 0 && nw == 3) {
+      Val a, r;
+      if (!read_symb(vm, w[2], ln, &a)) return;
+      if (a.t != V_STR) {
+        vm_fail(vm, "řádek %d: STRLEN chce řetězec (chyba 53)", ln);
+        return;
+      }
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      memset(&r, 0, sizeof r);
+      r.t = V_INT;
+      r.i = (long long)a.n;
+      v->v = r;
+      v->init = true;
+    } else if ((strcmp(op, "GETCHAR") == 0 || strcmp(op, "STRI2INT") == 0) && nw == 4) {
+      Val a, b, r;
+      if (!read_symb(vm, w[2], ln, &a) || !read_symb(vm, w[3], ln, &b)) return;
+      if (a.t != V_STR || b.t != V_INT) {
+        vm_fail(vm, "řádek %d: %s chce řetězec a celé číslo (chyba 53)", ln, op);
+        return;
+      }
+      if (b.i < 0 || b.i >= (long long)a.n) {
+        vm_rt(vm, 58, "řádek %d: %s s indexem %lld mimo řetězec délky %zu (chyba 58)", ln, op, b.i, a.n);
+        return;
+      }
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      if (op[0] == 'G') {
+        r = str_val(vm, a.s + b.i, 1);
+      } else {
+        memset(&r, 0, sizeof r);
+        r.t = V_INT;
+        r.i = (unsigned char)a.s[b.i];
+      }
+      v->v = r;
+      v->init = true;
+    } else if (strcmp(op, "READ") == 0 && nw == 3) {
+      Val r;
+      if (!read_input(vm, w[2], &r, ln)) return;
+      Var *v = need_var(vm, w[1], ln);
+      if (!v) return;
+      v->v = r;
+      v->init = true;
     } else {
       vm_fail(vm, "řádek %d: instrukci \"%s\" (s %d operandy) simulátor v testu neumí. Pro další fáze "
                   "ho rozšiř, nebo spusť test s ic26int", ln, op, nw - 1);
@@ -1192,10 +2807,13 @@ static void check_output(const Case *c, const char *text, size_t len) {
   /* tvar řádků a sběr LABEL / CALL / EXIT */
   int bad_lines = 0;
   int exit_line = -1, first_label = -1, entry_call = -1;
-  const char *label_name[64];
-  int label_line[64], n_labels = 0;
+  const char *label_name[128];
+  bool label_fn[128]; /* LABEL začátku funkce: hned za ním je CREATEFRAME (ostatní jsou návěští if/while) */
+  int label_line[128], n_labels = 0;
   const char *call_target[64];
   int call_line[64], n_calls = 0;
+  const char *jump_target[128];
+  int jump_line[128], n_jumps = 0;
 
   for (size_t i = 1; i < n; i++) {
     char buf[1024], *w[8];
@@ -1226,13 +2844,25 @@ static void check_output(const Case *c, const char *text, size_t len) {
           problem("řádek %d: operand \"%s\" končí názvem instrukce %s (chybí \\n?)", ln, w[t],
                   OPS[k].op);
 
-    if (strcmp(w[0], "LABEL") == 0 && nw == 2 && n_labels < 64) {
+    if (strcmp(w[0], "LABEL") == 0 && nw == 2 && n_labels < 128) {
       if (!valid_label(w[1]))
         problem("řádek %d: návěští \"%s\" má nepovolené znaky (smí _-$&%%*!? a alfanumerické, "
                 "bez @)", ln, w[1]);
       label_name[n_labels] = strdup(w[1]);
+      label_fn[n_labels] = (i + 1 < n) && first_word_is(lines[i + 1], "CREATEFRAME");
       label_line[n_labels++] = ln;
       if (first_label < 0) first_label = ln;
+    }
+    if (((strcmp(w[0], "JUMP") == 0 || strcmp(w[0], "JUMPIFEQS") == 0 ||
+          strcmp(w[0], "JUMPIFNEQS") == 0) && nw == 2) ||
+        ((strcmp(w[0], "JUMPIFEQ") == 0 || strcmp(w[0], "JUMPIFNEQ") == 0) && nw == 4)) {
+      if (!valid_label(w[1]))
+        problem("řádek %d: návěští \"%s\" má nepovolené znaky (smí _-$&%%*!? a alfanumerické, "
+                "bez @)", ln, w[1]);
+      if (n_jumps < 128) {
+        jump_target[n_jumps] = strdup(w[1]);
+        jump_line[n_jumps++] = ln;
+      }
     }
     if (strcmp(w[0], "CALL") == 0 && nw == 2 && n_calls < 64) {
       if (!valid_label(w[1]))
@@ -1255,7 +2885,7 @@ static void check_output(const Case *c, const char *text, size_t len) {
   for (int f = 0; f < nf; f++) {
     int cnt = 0;
     for (int i = 0; i < n_labels; i++)
-      if (has_name(label_name[i], funcs[f])) cnt++;
+      if (label_fn[i] && has_name(label_name[i], funcs[f])) cnt++;
     if (cnt == 0) problem("funkce '%s' se nevygenerovala (chybí její LABEL)", funcs[f]);
     if (cnt > 1) problem("funkce '%s' má LABEL víckrát (%dx)", funcs[f], cnt);
   }
@@ -1281,13 +2911,25 @@ labels_done:;
       entry_calls++;
       if (entry_call < 0) entry_call = call_line[i];
     }
-    for (int k = 0; c->others[k]; k++)
+    for (int k = 0; c->phase < 5 && c->others[k]; k++)
       if (has_name(call_target[i], c->others[k]))
         problem("řádek %d: CALL na '%s', ale tu funkci nikdo nevolá (volá se jen @main)",
                 call_line[i], c->others[k]);
   }
   if (entry_calls == 0) problem("chybí CALL na vstupní funkci '%s' (ta s @main)", c->entry);
   if (entry_calls > 1) problem("vstupní funkce '%s' se volá víckrát (%dx)", c->entry, entry_calls);
+
+  /* skoky: každý míří na existující návěští (kontroluje se i skok, který se za běhu nevykoná) */
+  for (int i = 0; i < n_jumps; i++) {
+    bool defined = false;
+    for (int j = 0; j < n_labels; j++)
+      if (strcmp(jump_target[i], label_name[j]) == 0) defined = true;
+    if (!defined) {
+      problem("řádek %d: skok na neexistující návěští \"%s\" (interpret: chyba 52). Návěští u JUMP a "
+              "JUMPIFEQS se musí napsat stejně jako u LABEL", jump_line[i], jump_target[i]);
+      break;
+    }
+  }
 
   /* pořadí: CALL, EXIT, teprve pak definice funkcí */
   if (exit_line < 0) problem("chybí EXIT int@0 na konci hlavního kódu");
@@ -1305,7 +2947,7 @@ labels_done:;
       problem("řádek %zu: RETURN není hned za POPFRAME", i + 1);
       break;
     }
-    if (strcmp(lines[i - 2], "PUSHS nil@nil") != 0) {
+    if (c->phase < 5 && strcmp(lines[i - 2], "PUSHS nil@nil") != 0) {
       problem("řádek %zu: před POPFRAME chybí PUSHS nil@nil (podle plánu funkce Unit vrací nil@nil)",
               i + 1);
       break;
@@ -1322,7 +2964,10 @@ labels_done:;
     for (size_t i = 1; i <= n; i++) {
       char buf[1024], *w[8];
       int nw = (i < n) ? split_words(lines[i], buf, sizeof buf, w) : 0;
-      bool is_label = nw >= 1 && strcmp(w[0], "LABEL") == 0;
+      /* začátek funkce = LABEL a hned za ním CREATEFRAME; návěští if a while uvnitř funkce se
+       * nepočítají, jinak by se za nimi braly DEFVAR za cizí a hlásilo by se "chybí DEFVAR" */
+      bool is_label = nw >= 1 && strcmp(w[0], "LABEL") == 0 && i + 1 < n &&
+                      first_word_is(lines[i + 1], "CREATEFRAME");
       if (i == n || is_label) {
         if (in_fn) {
           for (int r = 0; r < nrefs; r++) {
@@ -1351,7 +2996,10 @@ labels_done:;
         if (ndefs < 64 && strncmp(w[1], "LF@", 3) == 0) snprintf(defs[ndefs++], 64, "%s", w[1]);
         continue;
       }
-      if (strcmp(w[0], "CREATEFRAME") != 0 && strcmp(w[0], "PUSHFRAME") != 0) past_defs = true;
+      /* POPS parametrů na začátku funkce (před tělem) DEFVAR za sebou nevylučuje */
+      if (strcmp(w[0], "CREATEFRAME") != 0 && strcmp(w[0], "PUSHFRAME") != 0 &&
+          !(strcmp(w[0], "POPS") == 0 && !past_defs))
+        past_defs = true;
       for (int t = 1; t < nw; t++)
         if (strncmp(w[t], "LF@", 3) == 0 && nrefs < 128) {
           snprintf(refs[nrefs], 64, "%s", w[t]);
@@ -1386,13 +3034,16 @@ labels_done:;
   if (g_nmsg == 0) {
     Vm *vm = calloc(1, sizeof *vm);
     if (!vm) exit(99);
+    vm->in = c->input ? c->input : "";
     vm_run(vm, lines, (int)n);
     if (vm->err[0]) {
       problem("simulace: %s", vm->err);
     } else {
-      if (vm->exit_code != 0) problem("simulace: program skončil s kódem %d (čekalo se 0)", vm->exit_code);
+      if (vm->exit_code != c->exit_code)
+        problem("simulace: program skončil s kódem %d (čekalo se %d)%s%s", vm->exit_code, c->exit_code,
+                vm->rt_msg[0] ? ". Chyba interpretu: " : "", vm->rt_msg);
       compare_output("simulace", c, vm->out ? vm->out : "", vm->outn);
-      if (vm->nst > 1)
+      if (c->exit_code == 0 && vm->nst > 1)
         problem("simulace: na konci programu zůstalo na zásobníku %d hodnot (smí jedna, návrat z "
                 "main). Některý příkaz po sobě něco zanechal, třeba print nezahodil hodnotu", vm->nst);
     }
@@ -1402,6 +3053,7 @@ labels_done:;
 
   for (int i = 0; i < n_labels; i++) free((void *)label_name[i]);
   for (int i = 0; i < n_calls; i++) free((void *)call_target[i]);
+  for (int i = 0; i < n_jumps; i++) free((void *)jump_target[i]);
   free(lines);
   free(copy);
 }
@@ -1411,9 +3063,11 @@ labels_done:;
 /* ------------------------------------------------------------------------- */
 
 /* Když interpret bere argumenty jinak, uprav jen příkaz tady. */
-static int interp_exec(const char *interp, const char *codefile, const char *outf, const char *errf) {
+static int interp_exec(const char *interp, const char *codefile, const char *inf, const char *outf,
+                       const char *errf) {
   char cmd[1024];
-  snprintf(cmd, sizeof cmd, "%s \"%s\" < /dev/null > \"%s\" 2> \"%s\"", interp, codefile, outf, errf);
+  snprintf(cmd, sizeof cmd, "%s \"%s\" < \"%s\" > \"%s\" 2> \"%s\"", interp, codefile,
+           inf ? inf : "/dev/null", outf, errf);
   int st = system(cmd);
   return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
 }
@@ -1430,7 +3084,7 @@ static bool interp_usable(const char *interp) {
   close(a);
   close(b);
   close(d);
-  bool ok = interp_exec(interp, codef, outf, errf) == 0;
+  bool ok = interp_exec(interp, codef, NULL, outf, errf) == 0;
   remove(codef);
   remove(outf);
   remove(errf);
@@ -1476,12 +3130,24 @@ static void run_interpreter(const Case *c, const char *interp, const char *codef
   close(fd1);
   close(fd2);
 
-  int rc = interp_exec(interp, codefile, outf, errf);
+  char inf[] = "/tmp/ifj_gen_in_XXXXXX";
+  bool has_in = false;
+  if (c->input && c->input[0]) {
+    int fd3 = mkstemp(inf);
+    if (fd3 >= 0) {
+      if (write(fd3, c->input, strlen(c->input)) < 0) { /* ignoruj */ }
+      close(fd3);
+      has_in = true;
+    }
+  }
+  int rc = interp_exec(interp, codefile, has_in ? inf : NULL, outf, errf);
+  if (has_in) remove(inf);
   size_t olen = 0, elen = 0;
   char *so = read_file(outf, &olen);
   char *se = read_file(errf, &elen);
-  if (rc != 0) {
-    problem("ic26int skončil s kódem %d (čekalo se 0). stderr: %s", rc, se ? esc(se, elen) : "");
+  if (rc != c->exit_code) {
+    problem("ic26int skončil s kódem %d (čekalo se %d). stderr: %s", rc, c->exit_code,
+            se ? esc(se, elen) : "");
   } else {
     compare_output("ic26int", c, so ? so : "", olen);
   }
@@ -1560,7 +3226,7 @@ static bool run_case(const Case *c, bool verbose, const char *interp) {
   bool ok = (g_nmsg == 0);
   if (ok) {
     printf("  OK    %-16s %s\n", c->name, c->desc);
-    if (verbose) print_code(text, 60);
+    if (verbose) print_code(text, 400);
   } else {
     printf("  CHYBA %-16s %s\n", c->name, c->desc);
     for (int i = 0; i < g_nmsg; i++) printf("        - %s\n", g_msg[i]);
@@ -1568,7 +3234,7 @@ static bool run_case(const Case *c, bool verbose, const char *interp) {
     if (len == 0)
       printf("        | (nic)\n");
     else
-      print_code(text, 30);
+      print_code(text, 400);
   }
   free(text);
   remove(codef);
@@ -1598,10 +3264,11 @@ int main(int argc, char **argv) {
   const char *interp = find_interpreter(interp_buf, sizeof interp_buf, &explicit_env);
 
   int total_ok = 0, total_bad = 0, ran = 0;
-  int phase_ok[4] = {0}, phase_bad[4] = {0};
-  static const char *const PHASE_NAME[4] = {"kostra programu a funkcí", "konstanty a print",
-                                           "výrazy", "proměnné"};
-  for (int phase = 0; phase <= 3; phase++) {
+  int phase_ok[7] = {0}, phase_bad[7] = {0};
+  static const char *const PHASE_NAME[7] = {"kostra programu a funkcí", "konstanty a print",
+                                           "výrazy", "proměnné", "if a while", "funkce",
+                                           "vestavěné funkce"};
+  for (int phase = 0; phase <= 6; phase++) {
     bool header = false;
     for (size_t i = 0; i < N_CASES; i++) {
       if (CASES[i].phase != phase || !selected(&CASES[i], only)) continue;
@@ -1620,14 +3287,14 @@ int main(int argc, char **argv) {
     }
   }
   if (ran == 0) {
-    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3 a", only);
+    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6 a", only);
     for (size_t i = 0; i < N_CASES; i++) printf(" %s", CASES[i].name);
     printf("\n");
     return 2;
   }
 
   printf("== Výsledek: OK %d, chyby %d", total_ok, total_bad);
-  for (int phase = 0; phase <= 3; phase++)
+  for (int phase = 0; phase <= 6; phase++)
     if (phase_ok[phase] + phase_bad[phase] > 0)
       printf("   (fáze %d: %d/%d)", phase, phase_ok[phase], phase_ok[phase] + phase_bad[phase]);
   printf("\n");
