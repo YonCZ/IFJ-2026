@@ -144,7 +144,7 @@ size_t symtableFindIndex(symtable_t * table, const char * key){
             return (size_t)-1; //narazili jsme na prazdny slot -> klic v tabulce neni
         }
         if (table->items[i].status == SLOT_OCCUPIED && strcmp(table->items[i].key, key) == 0) {
-            return i;
+            return i; 
         }
         i = (i + 1) % table->size;
     } while (i != start);
