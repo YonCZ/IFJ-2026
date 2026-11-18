@@ -9,6 +9,7 @@
 
 #pragma once
 #include "ast.h"
+#include <stdbool.h>
 
 typedef struct {
   int label_counter;
@@ -33,3 +34,11 @@ void emit_string_literal(Gen *gem, char *str);
 
 void push_to_val(AST_NODE *node);
 void pop_to_val(AST_NODE *node);
+
+/*=======
+ *gen built ins
+ *=============
+ */
+bool is_builtin(const char *name);
+void emit_builtin_call(Gen *gen, AST_NODE *call);
+void emit_builtins(Gen *gen, AST_NODE *root);

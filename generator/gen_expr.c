@@ -71,10 +71,17 @@ void gen_expr(Gen *gen, AST_NODE *node) {
         printf("PUSHS nil@nil\n");
       }
       else {
+
+        //push params on stack
         for (AST_NODE *param = node->third; param != NULL; param = param->next) {
           gen_expr(gen, param);
         }
-        printf("CALL $f_%s\n",node->name);
+
+        //builtins
+        if (is_builtin(node->name)) {
+          emit_builtin_call(gen,node);
+        }
+        else printf("CALL $f_%s\n",node->name);
       }
       break;
 
