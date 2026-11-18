@@ -12,10 +12,12 @@
 #include <stdio.h>
 
 #include "parser/parser.h"
+#include "generator/generator.h"
 
 int main(void) {
     AST_NODE *root = parse_program();
-    // TODO: pass the AST to the generator
+    Gen gen = {0};
+    generate_program(&gen, root);
     free_AST(root);
     return 0;
 }
