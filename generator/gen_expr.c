@@ -7,7 +7,7 @@
  * Date: September 2026
  */
 
-
+#include <iso646.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,6 +115,38 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       }
       break;
     case NODE_BINOP:
+      if (node->op_type==OP_AND) {
+        int i = new_label(gen);
+
+        gen_expr(gen, node->left);
+        printf("POPS LF@tmp1\n");
+        printf("JUMPIFEQ and$end$%d LF@tmp1 bool@false\n",i);
+
+        gen_expr(gen, node->right);
+        printf("POPS LF@tmp1\n");
+
+        printf("LABEL and$end$%d\n",i);
+        printf("PUSHS LF@tmp1\n");
+        break;
+      }
+      if (node->op_type==OP_OR) {
+        int or_i = new_label(gen);
+
+        gen_expr(gen, node->left);
+        printf("POPS LF@tmp1\n");
+        printf("JUMPIFEQ or$end$%d LF@tmp1 bool@true\n",or_i);
+
+        gen_expr(gen, node->right);
+        printf("POPS LF@tmp1\n");
+
+        printf("LABEL or$end$%d\n",or_i);
+        printf("PUSHS LF@tmp1\n");
+        break;
+      }
+
+      /*
+       *checking if one is INT and other is FLOAT
+       */
       if ((node->left->data_type==DATA_INT&&node->right->data_type==DATA_DOUBLE)){
         gen_expr(gen, node->left);
         printf("INT2FLOATS\n");
@@ -129,8 +161,6 @@ void gen_expr(Gen *gen, AST_NODE *node) {
         gen_expr(gen, node->left);
         gen_expr(gen, node->right);
       }
-
-
 
       switch (node->op_type) {
         case OP_ADD:
@@ -168,12 +198,6 @@ void gen_expr(Gen *gen, AST_NODE *node) {
           break;
         case OP_SUB:
           printf("SUBS\n");
-          break;
-        case OP_AND:
-          printf("ANDS\n");
-          break;
-        case OP_OR:
-          printf("ORS\n");
           break;
         case OP_NOT:
           printf("NOTS\n");

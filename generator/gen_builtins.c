@@ -42,11 +42,13 @@
 
 enum {
   B_READLINE, B_READINT, B_READDOUBLE, B_TOSTR, B_TOINT, B_STRLENGTH, B_SUBSTR, B_ORD, B_CHR,
+  B_READBOOLEAN, /* rozšíření BOOLTHEN */
   B_COUNT
 };
 
 static const char *const BUILTIN_NAME[B_COUNT] = {"readLine", "readInt", "readDouble", "toStr", "toInt",
-                                                  "strLength", "subStr",  "ord",        "chr"};
+                                                  "strLength", "subStr",  "ord",        "chr",
+                                                  "readBoolean"};
 
 /* kolikrát se v programu volá každá vestavěná funkce (jen zda vůbec: 0 nebo víc) */
 static bool used[B_COUNT];
@@ -132,6 +134,20 @@ static void def_read(const char *name, const char *type, const char *default_val
   printf("JUMPIFNEQ $b_%s$ok LF@val nil@nil\n", name);
   printf("MOVE LF@val %s\n", default_value);
   printf("LABEL $b_%s$ok\n", name);
+  puts("PUSHS LF@val");
+  puts("POPFRAME");
+  puts("RETURN");
+}
+
+/* readBoolean (rozšíření BOOLTHEN): podle zadání odpovídá chování instrukce READ, takže se výsledek
+ * READ nijak neupravuje (na rozdíl od readInt a readDouble se nil nepřevádí na výchozí hodnotu).
+ * READ bool vrací true jen pro řádek "true" a false jen pro "false"; cokoli jiného a konec vstupu je nil. */
+static void def_readboolean(void) {
+  puts("LABEL $b_readBoolean");
+  puts("CREATEFRAME");
+  puts("PUSHFRAME");
+  puts("DEFVAR LF@val");
+  puts("READ LF@val bool");
   puts("PUSHS LF@val");
   puts("POPFRAME");
   puts("RETURN");
@@ -256,6 +272,7 @@ void emit_builtins(Gen *gen, AST_NODE *root) {
 
   if (used[B_READLINE]) def_read("readLine", "string", "string@");
   if (used[B_READINT]) def_read("readInt", "int", "int@0");
+  if (used[B_READBOOLEAN]) def_readboolean();
   if (used[B_READDOUBLE]) def_read("readDouble", "float", "float@0x0p+0");
   if (used_tostr_int) def_unary("toStr_int", "INT2STR");
   if (used_tostr_float) def_unary("toStr_float", "FLOAT2STR"); /* vždy %.2f, např. 2.50 */

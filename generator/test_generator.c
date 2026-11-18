@@ -2,7 +2,7 @@
  * Projekt: IFJ26 – překladač jazyka IFJ26 do IFJcode26
  * Soubor:  test_generator.c – test generátoru kódu (fáze 0: kostra, 1: konstanty a print,
  *                            2: výrazy, 3: proměnné, 4: if a while, 5: funkce,
- *                            6: vestavěné funkce)
+ *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN)
  *
  * ---------------------------------------------------------------------------
  * Tento soubor vygenerovala AI: Claude Sonnet 5.5 (Anthropic, claude-sonnet-5-5), 2026-11-17.
@@ -15,6 +15,7 @@
  * Prompt 5: "udelej test na fazi 4" (if, else if, else, while a jejich kombinace)
  * Prompt 6: "delej test pro fazi 5" (funkce: volání, parametry, return, rekurze)
  * Prompt 7: "chci abys mi builtins udelal tz" (fáze 6: vestavěné funkce, vstup, běhové chyby)
+ * Prompt 8: "udelej testy pro booltehn" (fáze 7: Boolean, !, && a || se zkratem, readBoolean)
  * Zadal a zrevidoval: Pavel Novák (xnovakp01)
  * ---------------------------------------------------------------------------
  *
@@ -32,8 +33,8 @@
  *         -o test_generator && ./test_generator
  *
  * POUŽITÍ
- *     ./test_generator              všechny případy (fáze 0 až 6)
- *     ./test_generator f6           jen fáze 6 (f0 až f5 = jen ta fáze)
+ *     ./test_generator              všechny případy (fáze 0 až 7)
+ *     ./test_generator f7           jen fáze 7 (f0 až f6 = jen ta fáze)
  *     ./test_generator f1_string    jen případ s tímto jménem
  *     ./test_generator -v           vypíše vygenerovaný kód i u případů, které prošly
  *     INTERP=cesta/k/ic26int ./test_generator
@@ -105,6 +106,18 @@
  *     a hned POPFRAME a RETURN. Prázdný return vrací nil@nil
  *   - proměnné volaného a volajícího se nemíchají (každá funkce má vlastní rámec), rekurze má v každém
  *     volání vlastní hodnoty
+ *   Fáze 7 (rozšíření BOOLTHEN): && je NODE_BINOP s OP_AND, || je NODE_BINOP s OP_OR, ! je
+ *   NODE_UNOP s OP_NOT (operand v left); všechny mají data_type DATA_BOOL. Test kontroluje:
+ *   - pravdivostní tabulky && a || (všechny čtyři kombinace), !, !!, == a != nad Boolean
+ *   - Boolean v proměnných (val, var, přiřazení), parametrech, návratových hodnotách (return i
+ *     poslední výraz těla) a v podmínkách if, else if, while (if bez else má třetí potomek NULL)
+ *   - ZKRAT: && a || se vyhodnocují zleva doprava a pravý operand se nevyhodnotí, když už je
+ *     výsledek jasný. Test to pozná tak, že pravý operand je celočíselné dělení nulou
+ *     (b != 0 && 10 / b > 1 s b = 0): bez zkratu skončí program chybou 57 místo vypsání false.
+ *     Případy *_funexp používají totéž s voláním funkce s vedlejším účinkem (rozšíření FUNEXP)
+ *   - vnořené && a || (zleva i zprava) a víc && a || v jedné funkci: každé návěští jen jednou
+ *   - readBoolean: READ bool vrací true jen pro řádek "true", false jen pro "false"
+ *   - toStr(Boolean) je "true" nebo "false"
  *   Fáze 6 (vestavěné funkce): uzel NODE_CALL se jménem funkce (readInt, readDouble, readLine, toStr,
  *   toInt, strLength, subStr, ord, chr), argumenty ve third (řetěz přes next), data_type = typ výsledku.
  *   Typ argumentu toStr je v data_type argumentu (Int, Double nebo String). V základním zadání
@@ -1404,6 +1417,274 @@ static AST_NODE *build_f6_read_func(void) { /* čtení uvnitř uživatelské fun
 #undef S
 #undef U
 
+/* fáze 7: rozšíření BOOLTHEN. && = BINOP OP_AND, || = BINOP OP_OR, ! = UNOP OP_NOT, vše DATA_BOOL. */
+#define I DATA_INT
+#define S DATA_STRING
+#define B DATA_BOOL
+#define U DATA_UNIT
+#define BAND(l, r) bin(OP_AND, (l), (r), B)
+#define BOR(l, r) bin(OP_OR, (l), (r), B)
+#define BNOT(x) not_op((x))
+#define UB(name, id) use((name), (id), B)
+#define UI(name, id) use((name), (id), I)
+#define LT_(l, r) bin(OP_LT, (l), (r), B)
+#define GT_(l, r) bin(OP_GT, (l), (r), B)
+#define EQ_(l, r) bin(OP_EQ, (l), (r), B)
+#define NEQ_(l, r) bin(OP_NEQ, (l), (r), B)
+#define PS(str, nx) print_stmt(lit_s(str), (nx))
+#define P(e, nx) print_stmt((e), (nx))
+
+static AST_NODE *not_op(AST_NODE *x) {
+  AST_NODE *n = ast_unop_create(x, NULL, OP_NOT);
+  n->data_type = DATA_BOOL;
+  return n;
+}
+static AST_NODE *prog7(AST_NODE *body) { return make_program(main_fn(body, NULL)); }
+/* 10 / b > 1: pravý operand zkratu; pro b = 0 je to dělení nulou (chyba 57), když se vyhodnotí */
+static AST_NODE *div_gt(long long a, const char *v, int id, long long limit) {
+  return GT_(bin(OP_DIV, lit_i(a), UI(v, id), I), lit_i(limit));
+}
+
+/* pravdivostní tabulky */
+#define TT(name, op, a, b) \
+  static AST_NODE *build_##name(void) { return prog7(P(bin(op, lit_b(a), lit_b(b), B), NULL)); }
+TT(f7_and_tt, OP_AND, true, true)
+TT(f7_and_tf, OP_AND, true, false)
+TT(f7_and_ft, OP_AND, false, true)
+TT(f7_and_ff, OP_AND, false, false)
+TT(f7_or_tt, OP_OR, true, true)
+TT(f7_or_tf, OP_OR, true, false)
+TT(f7_or_ft, OP_OR, false, true)
+TT(f7_or_ff, OP_OR, false, false)
+#undef TT
+
+static AST_NODE *build_f7_not(void) { /* !true, !false, !!true */
+  return prog7(P(BNOT(lit_b(true)), P(BNOT(lit_b(false)), P(BNOT(BNOT(lit_b(true))), NULL))));
+}
+static AST_NODE *build_f7_not_var(void) {
+  return prog7(vdef("a", 10, true, B, lit_b(true), P(BNOT(UB("a", 10)), NULL)));
+}
+static AST_NODE *build_f7_vars(void) { /* val a = true; val b = false; print(a && b); print(a || b) */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(false),
+                         P(BAND(UB("a", 10), UB("b", 11)), P(BOR(UB("a", 10), UB("b", 11)), NULL)))));
+}
+static AST_NODE *build_f7_rel(void) { /* 1 < 2 && 3 < 4 ; 1 < 2 && 4 < 3 */
+  return prog7(P(BAND(LT_(lit_i(1), lit_i(2)), LT_(lit_i(3), lit_i(4))),
+                 P(BAND(LT_(lit_i(1), lit_i(2)), LT_(lit_i(4), lit_i(3))), NULL)));
+}
+static AST_NODE *build_f7_prec_or_and(void) { /* true || false && false = true || (false && false) */
+  return prog7(P(BOR(lit_b(true), BAND(lit_b(false), lit_b(false))), NULL));
+}
+static AST_NODE *build_f7_prec_and_or(void) { /* (true || false) && false */
+  return prog7(P(BAND(BOR(lit_b(true), lit_b(false)), lit_b(false)), NULL));
+}
+static AST_NODE *build_f7_prec_not(void) { /* !false && true ; !a && b s a = true */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(true),
+                         P(BAND(BNOT(lit_b(false)), lit_b(true)), P(BAND(BNOT(UB("a", 10)), UB("b", 11)), NULL)))));
+}
+static AST_NODE *build_f7_slide(void) { /* x < 0 && !u s x = -1, u = false (příklad ze slidů) */
+  return prog7(vdef("x", 10, true, I, lit_i(-1),
+                    vdef("u", 11, true, B, lit_b(false),
+                         P(BAND(LT_(UI("x", 10), lit_i(0)), BNOT(UB("u", 11))), NULL))));
+}
+static AST_NODE *build_f7_eq(void) { /* true == true, true != false, false == true */
+  return prog7(P(EQ_(lit_b(true), lit_b(true)),
+                 P(NEQ_(lit_b(true), lit_b(false)), P(EQ_(lit_b(false), lit_b(true)), NULL))));
+}
+static AST_NODE *build_f7_eq_expr(void) { /* (a && b) == b ; (a || b) != b */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(false),
+                         P(EQ_(BAND(UB("a", 10), UB("b", 11)), UB("b", 11)),
+                           P(NEQ_(BOR(UB("a", 10), UB("b", 11)), UB("b", 11)), NULL)))));
+}
+static AST_NODE *build_f7_val(void) { /* val ok = a && b; print(ok) */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(true),
+                         vdef("ok", 12, true, B, BAND(UB("a", 10), UB("b", 11)), P(UB("ok", 12), NULL)))));
+}
+static AST_NODE *build_f7_assign(void) { /* var f = true; f = f && false; print(f); f = !f; print(f) */
+  return prog7(vdef("f", 10, false, B, lit_b(true),
+                    assign(UB("f", 10), BAND(UB("f", 10), lit_b(false)),
+                           P(UB("f", 10), assign(UB("f", 10), BNOT(UB("f", 10)), P(UB("f", 10), NULL))))));
+}
+
+/* zkrat: pravý operand je dělení nulou, vyhodnotit se nesmí */
+static AST_NODE *build_f7_short_and(void) { /* b != 0 && 10 / b > 1, b = 0 */
+  return prog7(vdef("b", 10, true, I, lit_i(0),
+                    P(BAND(NEQ_(UI("b", 10), lit_i(0)), div_gt(10, "b", 10, 1)), PS("!", NULL))));
+}
+static AST_NODE *build_f7_short_and_eval(void) { /* totéž s b = 2: pravý operand se vyhodnotí (10 / 2 > 1) */
+  return prog7(vdef("b", 10, true, I, lit_i(2),
+                    P(BAND(NEQ_(UI("b", 10), lit_i(0)), div_gt(10, "b", 10, 1)), NULL)));
+}
+static AST_NODE *build_f7_short_or(void) { /* b == 0 || 10 / b > 1, b = 0 */
+  return prog7(vdef("b", 10, true, I, lit_i(0),
+                    P(BOR(EQ_(UI("b", 10), lit_i(0)), div_gt(10, "b", 10, 1)), PS("!", NULL))));
+}
+static AST_NODE *build_f7_short_or_eval(void) { /* b == 0 || 3 / b > 1 s b = 5: pravý operand se vyhodnotí, 0 > 1 */
+  return prog7(vdef("b", 10, true, I, lit_i(5),
+                    P(BOR(EQ_(UI("b", 10), lit_i(0)), div_gt(3, "b", 10, 1)), NULL)));
+}
+static AST_NODE *build_f7_short_chain(void) { /* (x != 0 && 5/x > 1) && 5/x > 2, x = 0 */
+  return prog7(vdef("x", 10, true, I, lit_i(0),
+                    P(BAND(BAND(NEQ_(UI("x", 10), lit_i(0)), div_gt(5, "x", 10, 1)), div_gt(5, "x", 10, 2)), NULL)));
+}
+static AST_NODE *build_f7_short_chain_right(void) { /* x != 0 && (5/x > 1 && 5/x > 2), x = 0 */
+  return prog7(vdef("x", 10, true, I, lit_i(0),
+                    P(BAND(NEQ_(UI("x", 10), lit_i(0)), BAND(div_gt(5, "x", 10, 1), div_gt(5, "x", 10, 2))), NULL)));
+}
+static AST_NODE *build_f7_short_or_chain(void) { /* (x == 0 || 5/x > 1) || 5/x > 2, x = 0 */
+  return prog7(vdef("x", 10, true, I, lit_i(0),
+                    P(BOR(BOR(EQ_(UI("x", 10), lit_i(0)), div_gt(5, "x", 10, 1)), div_gt(5, "x", 10, 2)), NULL)));
+}
+static AST_NODE *build_f7_short_mixed(void) { /* (x == 0 || 5/x > 1) && !(x != 0 && 5/x > 1), x = 0 */
+  AST_NODE *l = BOR(EQ_(UI("x", 10), lit_i(0)), div_gt(5, "x", 10, 1));
+  AST_NODE *r = BNOT(BAND(NEQ_(UI("x", 10), lit_i(0)), div_gt(5, "x", 10, 1)));
+  return prog7(vdef("x", 10, true, I, lit_i(0), P(BAND(l, r), NULL)));
+}
+static AST_NODE *build_f7_short_loop(void) { /* while i < 3 && 6 / (3 - i) > 0: pro i = 3 by se dělilo nulou */
+  AST_NODE *div = bin(OP_DIV, lit_i(6), bin(OP_SUB, lit_i(3), UI("i", 10), I), I);
+  AST_NODE *cond = BAND(LT_(UI("i", 10), lit_i(3)), GT_(div, lit_i(0)));
+  return prog7(vdef("i", 10, false, I, lit_i(0),
+                    while_stmt(cond, P(UI("i", 10), inc("i", 10, NULL)), PS("|", NULL))));
+}
+static AST_NODE *build_f7_short_if(void) { /* if x != 0 && 10 / x > 1 then yes else no, x = 0 */
+  return prog7(vdef("x", 10, true, I, lit_i(0),
+                    if_stmt(BAND(NEQ_(UI("x", 10), lit_i(0)), div_gt(10, "x", 10, 1)), PS("yes", NULL),
+                            PS("no", NULL), NULL)));
+}
+static AST_NODE *build_f7_many(void) { /* víc && a || v jedné funkci: (a && b) || (c && d) || (a && !d) */
+  AST_NODE *e = BOR(BOR(BAND(UB("a", 10), UB("b", 11)), BAND(UB("c", 12), UB("d", 13))),
+                    BAND(UB("a", 10), BNOT(UB("d", 13))));
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(false),
+                         vdef("c", 12, true, B, lit_b(true),
+                              vdef("d", 13, true, B, lit_b(false), P(e, P(BAND(UB("a", 10), UB("b", 11)), NULL)))))));
+}
+static AST_NODE *build_f7_nested_tmp(void) { /* ((a && b) && (c && d)): vnořené výrazy si nesmí přepisovat pomocnou proměnnou */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(true),
+                         vdef("c", 12, true, B, lit_b(true),
+                              vdef("d", 13, true, B, lit_b(false),
+                                   P(BAND(BAND(UB("a", 10), UB("b", 11)), BAND(UB("c", 12), UB("d", 13))),
+                                     P(BOR(BOR(UB("d", 13), UB("d", 13)), BAND(UB("a", 10), UB("c", 12))), NULL)))))));
+}
+
+/* podmínky */
+static AST_NODE *build_f7_if_andor(void) { /* if (a && b) || c then T else F */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("b", 11, true, B, lit_b(false),
+                         vdef("c", 12, true, B, lit_b(true),
+                              if_stmt(BOR(BAND(UB("a", 10), UB("b", 11)), UB("c", 12)), PS("T", NULL), PS("F", NULL), NULL)))));
+}
+static AST_NODE *build_f7_while_and(void) { /* while i < 5 && ok: konec, až ok = false (if bez else) */
+  AST_NODE *stop = if_stmt(EQ_(UI("i", 10), lit_i(3)), assign(UB("ok", 11), lit_b(false), NULL), NULL, NULL);
+  AST_NODE *body = P(UI("i", 10), inc("i", 10, stop));
+  return prog7(vdef("i", 10, false, I, lit_i(0),
+                    vdef("ok", 11, false, B, lit_b(true),
+                         while_stmt(BAND(LT_(UI("i", 10), lit_i(5)), UB("ok", 11)), body, NULL))));
+}
+static AST_NODE *build_f7_if_noelse(void) { /* if x < 0 then neg (bez else); if x > 5 then big */
+  return prog7(vdef("x", 10, true, I, lit_i(-1),
+                    if_stmt(LT_(UI("x", 10), lit_i(0)), PS("neg", NULL), NULL,
+                            if_stmt(GT_(UI("x", 10), lit_i(5)), PS("big", NULL), NULL, PS("end", NULL)))));
+}
+static AST_NODE *build_f7_else_if(void) { /* if x < 0 && !u then opt1 else if x == 0 then print(false), x = 0 */
+  AST_NODE *second = if_stmt(EQ_(UI("x", 10), lit_i(0)), P(lit_b(false), NULL), NULL, NULL);
+  return prog7(vdef("x", 10, true, I, lit_i(0),
+                    vdef("u", 11, true, B, lit_b(false),
+                         if_stmt(BAND(LT_(UI("x", 10), lit_i(0)), BNOT(UB("u", 11))), PS("opt1", NULL), second, NULL))));
+}
+static AST_NODE *build_f7_else_if_chain(void) { /* x = 5: neg / zero / pos */
+  AST_NODE *e2 = if_stmt(EQ_(UI("x", 10), lit_i(0)), PS("zero", NULL), PS("pos", NULL), NULL);
+  return prog7(vdef("x", 10, true, I, lit_i(5), if_stmt(LT_(UI("x", 10), lit_i(0)), PS("neg", NULL), e2, NULL)));
+}
+
+/* funkce s Boolean */
+static AST_NODE *build_f7_param(void) { /* flip(x: Boolean): Boolean = return !x */
+  AST_NODE *f = fdef("flip", B, par("x", 1, B, NULL), fret(BNOT(UB("x", 1)), NULL), NULL);
+  return make_program(main_fn(vdef("r", 10, true, B, fcall("flip", lit_b(true), B), P(UB("r", 10), NULL)), f));
+}
+static AST_NODE *build_f7_param_two(void) { /* both(a, b) = return a && b */
+  AST_NODE *f = fdef("both", B, par("a", 1, B, par("b", 2, B, NULL)), fret(BAND(UB("a", 1), UB("b", 2)), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, B, fcall("both", a2(lit_b(true), lit_b(false)), B),
+           vdef("s", 11, true, B, fcall("both", a2(lit_b(true), lit_b(true)), B),
+                P(UB("r", 10), P(UB("s", 11), NULL)))),
+      f));
+}
+static AST_NODE *build_f7_ret_last(void) { /* isPos(n: Int): Boolean = n > 0 (poslední výraz těla) */
+  AST_NODE *f = fdef("isPos", B, par("n", 1, I, NULL), flast(GT_(UI("n", 1), lit_i(0)), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, B, fcall("isPos", lit_i(3), B),
+           vdef("s", 11, true, B, fcall("isPos", lit_i(-3), B), P(UB("r", 10), P(UB("s", 11), NULL)))),
+      f));
+}
+static AST_NODE *build_f7_ret_if(void) { /* check(n): if n < 0 then return false else return true */
+  AST_NODE *f = fdef("check", B, par("n", 1, I, NULL),
+                     if_stmt(LT_(UI("n", 1), lit_i(0)), fret(lit_b(false), NULL), fret(lit_b(true), NULL), NULL), NULL);
+  return make_program(main_fn(
+      vdef("r", 10, true, B, fcall("check", lit_i(-1), B),
+           vdef("s", 11, true, B, fcall("check", lit_i(1), B), P(UB("r", 10), P(UB("s", 11), NULL)))),
+      f));
+}
+static AST_NODE *side_fn(AST_NODE *next) { /* side(): Boolean: vypíše X a vrátí true (vedlejší účinek) */
+  return fdef("side", B, NULL, PS("X", fret(lit_b(true), NULL)), next);
+}
+static AST_NODE *build_f7_short_funexp(void) { /* false && side() nevolá side; true && side() ano */
+  return make_program(main_fn(P(BAND(lit_b(false), fcall("side", NULL, B)), P(BAND(lit_b(true), fcall("side", NULL, B)), NULL)),
+                              side_fn(NULL)));
+}
+static AST_NODE *build_f7_short_funexp_or(void) { /* true || side() nevolá side; false || side() ano */
+  return make_program(main_fn(P(BOR(lit_b(true), fcall("side", NULL, B)), P(BOR(lit_b(false), fcall("side", NULL, B)), NULL)),
+                              side_fn(NULL)));
+}
+static AST_NODE *build_f7_param_expr(void) { /* flip(a && b): argument je výraz (FUNEXP) */
+  AST_NODE *f = fdef("flip", B, par("x", 1, B, NULL), fret(BNOT(UB("x", 1)), NULL), NULL);
+  return make_program(main_fn(
+      vdef("a", 10, true, B, lit_b(true),
+           vdef("b", 11, true, B, lit_b(false), P(fcall("flip", BAND(UB("a", 10), UB("b", 11)), B), NULL))),
+      f));
+}
+
+/* toStr a readBoolean */
+static AST_NODE *build_f7_tostr(void) { /* toStr(a) a toStr(false) */
+  return prog7(vdef("a", 10, true, B, lit_b(true),
+                    vdef("s", 11, true, S, fcall("toStr", UB("a", 10), S),
+                         vdef("t", 12, true, S, fcall("toStr", lit_b(false), S),
+                              P(use("s", 11, S), P(use("t", 12, S), NULL))))));
+}
+static AST_NODE *build_f7_tostr_expr(void) { /* print(toStr(true && false)) (FUNEXP) */
+  return prog7(P(fcall("toStr", BAND(lit_b(true), lit_b(false)), S), NULL));
+}
+static AST_NODE *build_f7_readbool(void) { return prog7(vdef("r", 10, true, B, fcall("readBoolean", NULL, B), P(UB("r", 10), NULL))); }
+static AST_NODE *build_f7_readbool_two(void) { /* dva řádky: a && b a a || b */
+  return prog7(vdef("a", 10, true, B, fcall("readBoolean", NULL, B),
+                    vdef("b", 11, true, B, fcall("readBoolean", NULL, B),
+                         P(BAND(UB("a", 10), UB("b", 11)), P(BOR(UB("a", 10), UB("b", 11)), NULL)))));
+}
+static AST_NODE *build_f7_readbool_if(void) { /* if readBoolean() then yes else no (přes proměnnou) */
+  return prog7(vdef("r", 10, true, B, fcall("readBoolean", NULL, B),
+                    if_stmt(UB("r", 10), PS("yes", NULL), PS("no", NULL), NULL)));
+}
+#undef BAND
+#undef BOR
+#undef BNOT
+#undef UB
+#undef UI
+#undef LT_
+#undef GT_
+#undef EQ_
+#undef NEQ_
+#undef PS
+#undef P
+#undef I
+#undef S
+#undef B
+#undef U
+
 typedef struct {
   const char *name;
   int phase;
@@ -1815,6 +2096,106 @@ static const Case CASES[] = {
      "readInt() jako příkaz zahodí první řádek, vypíše se druhý", "2", {NULL}, "1\n2\n", 0},
     {"f6_read_func", 6, "main", {"sum2", NULL}, build_f6_read_func,
      "čtení uvnitř uživatelské funkce: 3 + 4", "7", {NULL}, "3\n4\n", 0},
+    {"f7_and_tt", 7, "main", {NULL}, build_f7_and_tt,
+     "print(true && true)", "true", {NULL}, NULL, 0},
+    {"f7_and_tf", 7, "main", {NULL}, build_f7_and_tf,
+     "print(true && false)", "false", {NULL}, NULL, 0},
+    {"f7_and_ft", 7, "main", {NULL}, build_f7_and_ft,
+     "print(false && true)", "false", {NULL}, NULL, 0},
+    {"f7_and_ff", 7, "main", {NULL}, build_f7_and_ff,
+     "print(false && false)", "false", {NULL}, NULL, 0},
+    {"f7_or_tt", 7, "main", {NULL}, build_f7_or_tt,
+     "print(true || true)", "true", {NULL}, NULL, 0},
+    {"f7_or_tf", 7, "main", {NULL}, build_f7_or_tf,
+     "print(true || false)", "true", {NULL}, NULL, 0},
+    {"f7_or_ft", 7, "main", {NULL}, build_f7_or_ft,
+     "print(false || true)", "true", {NULL}, NULL, 0},
+    {"f7_or_ff", 7, "main", {NULL}, build_f7_or_ff,
+     "print(false || false)", "false", {NULL}, NULL, 0},
+    {"f7_not", 7, "main", {NULL}, build_f7_not,
+     "!true, !false, !!true", "falsetruetrue", {NULL}, NULL, 0},
+    {"f7_not_var", 7, "main", {NULL}, build_f7_not_var,
+     "val a = true; print(!a)", "false", {NULL}, NULL, 0},
+    {"f7_vars", 7, "main", {NULL}, build_f7_vars,
+     "val a = true; val b = false; a && b = false, a || b = true", "falsetrue", {NULL}, NULL, 0},
+    {"f7_rel", 7, "main", {NULL}, build_f7_rel,
+     "1 < 2 && 3 < 4 = true; 1 < 2 && 4 < 3 = false (&& pod relačními operátory)", "truefalse", {NULL}, NULL, 0},
+    {"f7_prec_or_and", 7, "main", {NULL}, build_f7_prec_or_and,
+     "true || false && false = true (|| má nižší prioritu než &&)", "true", {NULL}, NULL, 0},
+    {"f7_prec_and_or", 7, "main", {NULL}, build_f7_prec_and_or,
+     "(true || false) && false = false", "false", {NULL}, NULL, 0},
+    {"f7_prec_not", 7, "main", {NULL}, build_f7_prec_not,
+     "!false && true = true; !a && b s a = true = false", "truefalse", {NULL}, NULL, 0},
+    {"f7_slide", 7, "main", {NULL}, build_f7_slide,
+     "x < 0 && !u s x = -1, u = false = true (příklad ze slidů)", "true", {NULL}, NULL, 0},
+    {"f7_eq", 7, "main", {NULL}, build_f7_eq,
+     "true == true, true != false, false == true", "truetruefalse", {NULL}, NULL, 0},
+    {"f7_eq_expr", 7, "main", {NULL}, build_f7_eq_expr,
+     "(a && b) == b a (a || b) != b s a = true, b = false", "truetrue", {NULL}, NULL, 0},
+    {"f7_val", 7, "main", {NULL}, build_f7_val,
+     "val ok = a && b; print(ok)", "true", {NULL}, NULL, 0},
+    {"f7_assign", 7, "main", {NULL}, build_f7_assign,
+     "var f = true; f = f && false; f = !f", "falsetrue", {NULL}, NULL, 0},
+    {"f7_short_and", 7, "main", {NULL}, build_f7_short_and,
+     "ZKRAT: b != 0 && 10 / b > 1 s b = 0: bez zkratu chyba 57", "false!", {NULL}, NULL, 0},
+    {"f7_short_and_eval", 7, "main", {NULL}, build_f7_short_and_eval,
+     "b != 0 && 10 / b > 1 s b = 2: pravý operand se vyhodnotí = true", "true", {NULL}, NULL, 0},
+    {"f7_short_or", 7, "main", {NULL}, build_f7_short_or,
+     "ZKRAT: b == 0 || 10 / b > 1 s b = 0: bez zkratu chyba 57", "true!", {NULL}, NULL, 0},
+    {"f7_short_or_eval", 7, "main", {NULL}, build_f7_short_or_eval,
+     "b == 0 || 3 / b > 1 s b = 5: pravý operand se vyhodnotí = false", "false", {NULL}, NULL, 0},
+    {"f7_short_chain", 7, "main", {NULL}, build_f7_short_chain,
+     "ZKRAT: (x != 0 && 5/x > 1) && 5/x > 2 s x = 0 (vnořené zleva)", "false", {NULL}, NULL, 0},
+    {"f7_short_chain_right", 7, "main", {NULL}, build_f7_short_chain_right,
+     "ZKRAT: x != 0 && (5/x > 1 && 5/x > 2) s x = 0 (vnořené zprava)", "false", {NULL}, NULL, 0},
+    {"f7_short_or_chain", 7, "main", {NULL}, build_f7_short_or_chain,
+     "ZKRAT: (x == 0 || 5/x > 1) || 5/x > 2 s x = 0", "true", {NULL}, NULL, 0},
+    {"f7_short_mixed", 7, "main", {NULL}, build_f7_short_mixed,
+     "ZKRAT: (x == 0 || 5/x > 1) && !(x != 0 && 5/x > 1) s x = 0", "true", {NULL}, NULL, 0},
+    {"f7_short_loop", 7, "main", {NULL}, build_f7_short_loop,
+     "ZKRAT v while: i < 3 && 6 / (3 - i) > 0 (pro i = 3 by se dělilo nulou)", "012|", {NULL}, NULL, 0},
+    {"f7_short_if", 7, "main", {NULL}, build_f7_short_if,
+     "ZKRAT v if: x != 0 && 10 / x > 1 s x = 0 = else větev", "no", {NULL}, NULL, 0},
+    {"f7_many", 7, "main", {NULL}, build_f7_many,
+     "víc && a || v jedné funkci (každé návěští jednou): (a&&b) || (c&&d) || (a&&!d); a && b", "truefalse", {NULL}, NULL, 0},
+    {"f7_nested_tmp", 7, "main", {NULL}, build_f7_nested_tmp,
+     "((a && b) && (c && d)) a ((d || d) || (a && c)): vnořené výrazy", "falsetrue", {NULL}, NULL, 0},
+    {"f7_if_andor", 7, "main", {NULL}, build_f7_if_andor,
+     "if (a && b) || c then T else F", "T", {NULL}, NULL, 0},
+    {"f7_while_and", 7, "main", {NULL}, build_f7_while_and,
+     "while i < 5 && ok, if bez else nastaví ok = false při i == 3", "012", {NULL}, NULL, 0},
+    {"f7_if_noelse", 7, "main", {NULL}, build_f7_if_noelse,
+     "if bez else: if x < 0 then neg; if x > 5 then big", "negend", {NULL}, NULL, 0},
+    {"f7_else_if", 7, "main", {NULL}, build_f7_else_if,
+     "if x < 0 && !u then opt1 else if x == 0 then print(false), x = 0", "false", {NULL}, NULL, 0},
+    {"f7_else_if_chain", 7, "main", {NULL}, build_f7_else_if_chain,
+     "if/else if/else se třemi větvemi: x = 5 = pos", "pos", {NULL}, NULL, 0},
+    {"f7_param", 7, "main", {"flip", NULL}, build_f7_param,
+     "flip(x: Boolean): Boolean = return !x; flip(true)", "false", {NULL}, NULL, 0},
+    {"f7_param_two", 7, "main", {"both", NULL}, build_f7_param_two,
+     "both(a, b) = return a && b; both(true, false), both(true, true)", "falsetrue", {NULL}, NULL, 0},
+    {"f7_ret_last", 7, "main", {"isPos", NULL}, build_f7_ret_last,
+     "isPos(n): Boolean = n > 0 (poslední výraz těla); isPos(3), isPos(-3)", "truefalse", {NULL}, NULL, 0},
+    {"f7_ret_if", 7, "main", {"check", NULL}, build_f7_ret_if,
+     "check(n): if n < 0 then return false else return true; check(-1), check(1)", "falsetrue", {NULL}, NULL, 0},
+    {"f7_short_funexp", 7, "main", {"side", NULL}, build_f7_short_funexp,
+     "ZKRAT + FUNEXP: false && side() nevolá side, true && side() ho volá (vypíše X)", "falseXtrue", {NULL}, NULL, 0},
+    {"f7_short_funexp_or", 7, "main", {"side", NULL}, build_f7_short_funexp_or,
+     "ZKRAT + FUNEXP: true || side() nevolá side, false || side() ho volá", "trueXtrue", {NULL}, NULL, 0},
+    {"f7_param_expr", 7, "main", {"flip", NULL}, build_f7_param_expr,
+     "FUNEXP: flip(a && b) s a = true, b = false", "true", {NULL}, NULL, 0},
+    {"f7_tostr", 7, "main", {NULL}, build_f7_tostr,
+     "toStr(a) a toStr(false) = true, false", "truefalse", {NULL}, NULL, 0},
+    {"f7_tostr_expr", 7, "main", {NULL}, build_f7_tostr_expr,
+     "FUNEXP: print(toStr(true && false))", "false", {NULL}, NULL, 0},
+    {"f7_readbool", 7, "main", {NULL}, build_f7_readbool,
+     "readBoolean() přečte true", "true", {NULL}, "true\n", 0},
+    {"f7_readbool_false", 7, "main", {NULL}, build_f7_readbool,
+     "readBoolean() přečte false", "false", {NULL}, "false\n", 0},
+    {"f7_readbool_two", 7, "main", {NULL}, build_f7_readbool_two,
+     "dva řádky false a true: a && b a a || b", "falsetrue", {NULL}, "false\ntrue\n", 0},
+    {"f7_readbool_if", 7, "main", {NULL}, build_f7_readbool_if,
+     "readBoolean() v podmínce if (přes proměnnou)", "yes", {NULL}, "true\n", 0},
 };
 #define N_CASES (sizeof CASES / sizeof CASES[0])
 
@@ -2280,6 +2661,20 @@ static bool read_input(Vm *vm, const char *type, Val *r, int ln) {
   if (strcmp(type, "string") == 0) {
     *r = str_val(vm, in + st, e - st);
     vm->inpos = e;
+    return true;
+  }
+  if (strcmp(type, "bool") == 0) { /* jen přesně true nebo false (malými písmeny), jinak nil */
+    r->t = V_NIL;
+    if (st >= len) return true;
+    vm->inpos = e;
+    size_t bn = line_end - st;
+    if (bn == 4 && memcmp(in + st, "true", 4) == 0) {
+      r->t = V_BOOL;
+      r->i = 1;
+    } else if (bn == 5 && memcmp(in + st, "false", 5) == 0) {
+      r->t = V_BOOL;
+      r->i = 0;
+    }
     return true;
   }
   bool is_int = strcmp(type, "int") == 0, is_float = strcmp(type, "float") == 0;
@@ -3264,11 +3659,11 @@ int main(int argc, char **argv) {
   const char *interp = find_interpreter(interp_buf, sizeof interp_buf, &explicit_env);
 
   int total_ok = 0, total_bad = 0, ran = 0;
-  int phase_ok[7] = {0}, phase_bad[7] = {0};
-  static const char *const PHASE_NAME[7] = {"kostra programu a funkcí", "konstanty a print",
+  int phase_ok[8] = {0}, phase_bad[8] = {0};
+  static const char *const PHASE_NAME[8] = {"kostra programu a funkcí", "konstanty a print",
                                            "výrazy", "proměnné", "if a while", "funkce",
-                                           "vestavěné funkce"};
-  for (int phase = 0; phase <= 6; phase++) {
+                                           "vestavěné funkce", "rozšíření BOOLTHEN"};
+  for (int phase = 0; phase <= 7; phase++) {
     bool header = false;
     for (size_t i = 0; i < N_CASES; i++) {
       if (CASES[i].phase != phase || !selected(&CASES[i], only)) continue;
@@ -3287,14 +3682,14 @@ int main(int argc, char **argv) {
     }
   }
   if (ran == 0) {
-    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6 a", only);
+    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7 a", only);
     for (size_t i = 0; i < N_CASES; i++) printf(" %s", CASES[i].name);
     printf("\n");
     return 2;
   }
 
   printf("== Výsledek: OK %d, chyby %d", total_ok, total_bad);
-  for (int phase = 0; phase <= 6; phase++)
+  for (int phase = 0; phase <= 7; phase++)
     if (phase_ok[phase] + phase_bad[phase] > 0)
       printf("   (fáze %d: %d/%d)", phase, phase_ok[phase], phase_ok[phase] + phase_bad[phase]);
   printf("\n");
