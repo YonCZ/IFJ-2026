@@ -8,6 +8,7 @@ Part of project IFJ2026
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "scanner/error.h"
 
 //function declarations
 
@@ -29,6 +30,7 @@ bool symtableInit(symtable_t * table){
     table->count = 0;
     table->items = (symtable_item_t *)calloc(table->size, sizeof(symtable_item_t));
     if (table->items == NULL) {
+        error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for symbol table.", "Memory allocation unsuccessful");
         return false; //allocation failed
     }
     for (size_t i = 0; i < table->size; i++) {
@@ -64,6 +66,7 @@ static bool symtableResize(symtable_t * table){
     size_t new_size = table->size * 2 + 1;
     symtable_item_t * new_items = (symtable_item_t *)calloc(new_size, sizeof(symtable_item_t));
     if (new_items == NULL) {
+        error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for symbol table resize.", "Memory allocation unsuccessful");
         return false; //allocation failed
     }
     //if succesful, copy the old items to the new table
@@ -117,6 +120,7 @@ bool symtableInsert(symtable_t * table, const char * key, void * value){
     }
     table->items[index].key = (char *)malloc(strlen(key) + 1); //allocates memory for the key + '\0'
     if (table->items[index].key == NULL) {
+        error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for symbol table key.", "Memory allocation unsuccessful");
         return false; //allocation failed
     }
     strcpy(table->items[index].key, key); //inserts the key into the table
