@@ -5,6 +5,7 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,7 +42,6 @@ typedef enum {
     STRING_ESCAPE_STATE,     //DONE
     MULTILINE_STRING_STATE,     //DONE
 
-    ZERO_STATE,          //DONE
 
     OR_STATE,   //DONE
     AND_STATE,     //DONE
@@ -230,13 +230,8 @@ static Token scan_raw(FILE *f) {
                     break;
                 }
                 //pokud je to cislo, tak jdeme do stavu INT_STATE
-                else if (c >= '1' && c <= '9') {
+                else if (c >= '0' && c <= '9') {
                     state = INT_STATE;
-                    ds_push_char(&str, c);
-                }
-                //pokud je to nula, tak jdeme do stave ZERO_STATE
-                else if (c == '0') {
-                    state = ZERO_STATE;
                     ds_push_char(&str, c);
                 }
                 //pokud je to pismeno, tak jde do stavu WORD_STATE
@@ -791,44 +786,6 @@ static Token scan_raw(FILE *f) {
                 }
                 break;
 
-            //ZERO_STATE =, satv ktery resi problematiku s nulou (kvuli 01.0 nebo 000_000)
-            case ZERO_STATE:
-                //pokud je tam tecka tak se daa zapsat do 0. neco a potom to muze jit do DOUBLE_STATE
-                if (c == '.') {
-                    int next = in_fgetc(f);
-                    if (next >= '0' && next <= '9'){
-                        ds_push_char(&str, c);
-                        ds_push_char(&str, next);
-                        state = DOUBLE_STATE;
-                    }
-                    //jinak je to INT_NUM_TOKEN protoze je to treba 10
-                    else {
-                        in_ungetc(f, next);
-                        in_ungetc(f, '.');
-                        token.type = INT_NUM_TOKEN;
-                        token.atribute = ds_dup(&str);
-                        token_found = true;
-                        break;
-                    }
-                }
-                //pokud po 0 je e tak zase do EXP_START_STATE
-                else if (c == 'e' || c == 'E') {
-                    ds_push_char(&str, c);
-                    state = EXP_START_STATE;
-                }
-                //pokud je po 0 cislo nebo pismeno tak nemuze zapsat a je to lexikalni chyba
-                else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-                    error_exit(ERROR_LEX, err_line(c), "Zero literal with invalid suffix");
-                }
-                //jinak je to INT_NUM_TOKEN neboli cislo 
-                else {
-                    in_ungetc(f, c);
-                    token.type = INT_NUM_TOKEN;
-                    token.atribute = ds_dup(&str);
-                    token_found = true;
-                    break;
-                }
-                break;
             //ASSIGN_STATE = urcuje dlasi podminky ktere obsahuji =
             case ASSIGN_STATE:
                 //je to EQ_TOKEN ==
@@ -1195,6 +1152,13 @@ static Token scan_raw(FILE *f) {
             default:
                 error_exit(ERROR_INTERNAL, current_line, "Unknown state in fsm");
         }
+    }
+    if (token.type == INT_NUM_TOKEN && token.atribute[0] == '0' &&
+        token.atribute[strspn(token.atribute, "0")] != '\0') {
+        error_exit(ERROR_LEX, err_line(c), "Nonzero integer starts with zero");
+    }
+    if (token.type == DOUBLE_NUM_TOKEN && !isfinite(strtod(token.atribute, NULL))) {
+        error_exit(ERROR_LEX, err_line(c), "Double literal out of range");
     }
     //je to konec radku, tak ukonci radek 
     if (token.type == EOL_TOKEN) {

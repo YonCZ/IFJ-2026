@@ -123,6 +123,7 @@ struct AST_NODE{
 
   bool is_extension; //extkw
   bool is_index;
+  bool int_to_double;
 
   /*
    *is_method=true
@@ -158,6 +159,8 @@ struct AST_NODE{
 
 
 AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE type);
+const char *ast_type_suffix(DATA_TYPE type);
+char *ast_method_key(const char *name, DATA_TYPE receiver);
 void ast_name(AST_NODE *node, char *name);
 
 AST_NODE * ast_int_literal_create( long long value,AST_NODE *next);

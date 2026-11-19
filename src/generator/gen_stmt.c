@@ -70,16 +70,19 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
     }
 
     case NODE_RETURN:
-      if (!node->left) {
-        printf("PUSHS nil@nil\n");
-        printf("POPFRAME\n");
-        printf("RETURN\n");
-      }
-      else{
+      if (node->left != NULL) {
         gen_expr(gen, node->left);
-        printf("POPFRAME\n");
-        printf("RETURN\n");
+        if (gen->return_type == DATA_UNIT) {
+          printf("POPS LF@tmp1\n");
+        } else if (gen->return_type == DATA_DOUBLE && node->left->data_type == DATA_INT) {
+          printf("INT2FLOATS\n");
+        }
       }
+      if (gen->return_type == DATA_UNIT) {
+        printf("PUSHS nil@nil\n");
+      }
+      printf("POPFRAME\n");
+      printf("RETURN\n");
       break;
 
     case NODE_FOR: {
@@ -157,4 +160,20 @@ void gen_block(Gen *gen, AST_NODE *fn) {
   for (AST_NODE *node = fn; node != NULL; node = node->next) {
     gen_stmt(gen,node);
   }
+}
+
+void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result) {
+  for (; stmt != NULL; stmt = stmt->next) {
+    if (stmt->next == NULL && result != DATA_UNIT &&
+        (stmt->type == NODE_EXPR_STMT || stmt->type == NODE_IF)) {
+      AST_NODE *expr = stmt->type == NODE_EXPR_STMT ? stmt->left : stmt;
+      gen_expr(gen, expr);
+      if (result == DATA_DOUBLE && expr->data_type == DATA_INT) {
+        printf("INT2FLOATS\n");
+      }
+      return;
+    }
+    gen_stmt(gen, stmt);
+  }
+  printf("PUSHS nil@nil\n");
 }

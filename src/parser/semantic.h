@@ -35,10 +35,11 @@ typedef struct {
     bool is_main;             // true pro @main
     bool is_defined;          // true po kontrole těla funkce
     bool explicit_return;     // true, pokud byl návratový typ uveden v hlavičce
-    bool is_recursive;        // true, pokud funkce volá samu sebe
-    bool has_return_stmt;     // true, pokud tělo obsahuje příkaz return
+    AST_NODE *visited_from;
     bool is_builtin;          // true pro vestavěné funkce
     bool is_extension;        // true pro metodu z extension bloku
+    AST_NODE *fn_node;        // uzel definice pro odlozene odvozeni typu
+    bool analyzing;           // probiha odvozovani typu
     int id;                   // unikátní id proměnné pro generátor
     param_info_t *params;     // Pole parametrů
     size_t param_count;       // Počet parametrů

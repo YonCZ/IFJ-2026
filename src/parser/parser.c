@@ -31,6 +31,9 @@ static int pos;
 // Unique id of every declaration in the program.
 static int next_id;
 
+// True while parsing branch expressions of an if that sits in call arguments.
+static bool expr_in_args;
+
 // Loads all tokens from f into the array, including EOF.
 static void load_tokens(FILE *f) {
     int cap = 128;
@@ -576,7 +579,7 @@ static bool precedence_can_parse(void) {
     int depth = 0;
     for (int i = pos; i < ntokens; i++) {
         Tokens t = tokens[i].type;
-        if (t == IF_TOKEN || t == ASSIGN_TOKEN) {
+        if (t == ASSIGN_TOKEN) {
             return false;
         }
         if (depth == 0 &&
@@ -598,7 +601,9 @@ static bool precedence_can_parse(void) {
 static AST_NODE *parse_rhs(void);
 static AST_NODE *wrap_expr_stmt(AST_NODE *expr);
 
-static AST_NODE *parse_if_expr(void) {
+static AST_NODE *parse_if_expr(bool in_args) {
+    bool prev_in_args = expr_in_args;
+    expr_in_args = in_args;
     Token kw = parser_advance();
     AST_NODE *cond = parse_rhs();
     parser_expect(THEN_TOKEN);
@@ -611,34 +616,31 @@ static AST_NODE *parse_if_expr(void) {
     } else {
         then_branch = wrap_expr_stmt(parse_rhs());
     }
-    AST_NODE *else_branch = NULL;
-    if (parser_peek().type == ELSE_TOKEN) {
+    if (parser_peek().type != ELSE_TOKEN) {
+        error_exit(ERROR_SYN, parser_peek().line, "else is required in an if expression");
+    }
+    parser_advance();
+    AST_NODE *else_branch;
+    if (parser_peek().type == EOL_TOKEN) {
         parser_advance();
-        if (parser_peek().type == EOL_TOKEN) {
-            parser_advance();
-            parser_expect(INDENT_TOKEN);
-            else_branch = parse_block();
-            parser_expect(DEDENT_TOKEN);
-        } else if (parser_peek().type == IF_TOKEN) {
-            else_branch = parse_if_expr();
-        } else {
-            else_branch = wrap_expr_stmt(parse_rhs());
-        }
+        parser_expect(INDENT_TOKEN);
+        else_branch = parse_block();
+        parser_expect(DEDENT_TOKEN);
+    } else if (parser_peek().type == IF_TOKEN) {
+        else_branch = parse_if_expr(in_args);
+    } else {
+        else_branch = wrap_expr_stmt(parse_rhs());
     }
     AST_NODE *node = ast_if_create(cond, then_branch, else_branch, NULL);
     node->line = kw.line;
+    expr_in_args = prev_in_args;
     return node;
 }
 
 static AST_NODE *parse_rhs(void) {
     Token t = parser_peek();
     if (t.type == IF_TOKEN) {
-        return parse_if_expr();
-    }
-    if (t.type == INTERP_START_TOKEN) {
-        AST_NODE *node = parse_interp();
-        skip_expression(); // postfix on the interp result (match, .člen)
-        return node;
+        return parse_if_expr(expr_in_args);
     }
     if (!is_expr_start(t.type)) {
         error_exit(ERROR_SYN, t.line, "syntax error");
@@ -646,7 +648,7 @@ static AST_NODE *parse_rhs(void) {
     int start = pos;
     AST_NODE *node = NULL;
     if (precedence_can_parse()) {
-        node = precedence_parse();
+        node = expr_in_args ? precedence_parse_arg() : precedence_parse();
     } else {
         skip_expression();
     }
@@ -794,6 +796,10 @@ static AST_NODE *parse_interp(void) {
 
 AST_NODE *parser_parse_interp(void) {
     return parse_interp();
+}
+
+AST_NODE *parser_parse_if_expr(bool in_args) {
+    return parse_if_expr(in_args);
 }
 
 static void parse_mid_item(AST_NODE **head, AST_NODE **tail);
@@ -1270,6 +1276,10 @@ static void parse_extension_def(AST_NODE **head, AST_NODE **tail) {
                                               receiver->name, NULL);
             recv->is_method = true;
             recv->line = receiver->line;
+            char *mangled = ast_method_key(method->name, receiver->data_type);
+            free(method->name);
+            ast_name(method, mangled);
+            free(mangled);
             AST_NODE *recv_group = ast_create_param_list(recv, NULL, 1);
             if (method->third == NULL) {
                 method->third = ast_create_params_list_of_list(recv_group, 1);

@@ -25,6 +25,30 @@ static char *ast_strdup(const char *ptr) {
 }
 
 
+const char *ast_type_suffix(DATA_TYPE type) {
+  switch (type) {
+    case DATA_INT: return "Int";
+    case DATA_DOUBLE: return "Double";
+    case DATA_STRING: return "String";
+    case DATA_BOOL: return "Bool";
+    case DATA_UNIT: return "Unit";
+    case DATA_LIST: return "List";
+    case DATA_UNION: return "Union";
+    default: return "Unknown";
+  }
+}
+
+char *ast_method_key(const char *name, DATA_TYPE receiver) {
+  const char *suffix = ast_type_suffix(receiver);
+  size_t len = strlen(name) + strlen(suffix) + 2;
+  char *key = malloc(len);
+  if (key == NULL) {
+    exit(99);
+  }
+  snprintf(key, len, "%s$%s", name, suffix);
+  return key;
+}
+
 AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE type) {
   AST_NODE *node = calloc(1,sizeof(AST_NODE));
   if (!node) {

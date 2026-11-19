@@ -13,9 +13,6 @@ The hashing algorithm used is the djb2 algorithm.
 #include <stdbool.h>
 #include <stddef.h>
 
-
-#define SYMTABLE_BASE_SIZE 100
-
 #define SYMTABLE_MAX_LOAD 0.75
 
 typedef enum {

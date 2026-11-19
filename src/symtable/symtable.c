@@ -10,6 +10,8 @@ Part of project IFJ2026
 #include <stdio.h>
 #include "scanner/error.h"
 
+#define SYMTABLE_BASE_SIZE 100
+
 //function declarations
 
 static size_t symtableHash(const char * key, size_t table_size){

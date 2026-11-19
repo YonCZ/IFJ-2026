@@ -70,12 +70,21 @@ void gen_expr(Gen *gen, AST_NODE *node) {
         else {
           gen_expr(gen, node->third);
           printf("POPS LF@tmp1\n");
-          printf("WRITE LF@tmp1\n");
+          if (node->third->data_type == DATA_UNIT) {
+            printf("WRITE string@()\n");
+          } else {
+            printf("WRITE LF@tmp1\n");
+          }
         }
         //only expresion which doesnt return value
         printf("PUSHS nil@nil\n");
       }
       else {
+
+        // receiver of an extension method goes first
+        if (node->is_method && node->left != NULL) {
+          gen_expr(gen, node->left);
+        }
 
         //push params on stack
         for (AST_NODE *param = node->third; param != NULL; param = param->next) {
@@ -103,13 +112,15 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       switch (node->op_type) {
         case OP_ADD:
           gen_expr(gen, node->left);
-          printf("PUSHS int@1\n");
-          printf("ADDS\n");
           break;
         case OP_SUB:
-          node->data_type == DATA_INT ? printf("PUSHS int@0\n"):printf(" PUSHS float@%a\n", 0.0);
           gen_expr(gen, node->left);
-          printf("SUBS\n");
+          if (node->data_type == DATA_DOUBLE) {
+            printf("PUSHS float@%a\n", -1.0);
+          } else {
+            printf("PUSHS int@-1\n");
+          }
+          printf("MULS\n");
           break;
         case OP_NOT:
           gen_expr(gen, node->left);
@@ -217,6 +228,34 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       }
       break;
 
+    case NODE_INTERP:
+      printf("PUSHS string@\n");
+      for (AST_NODE *part = node->left; part; part = part->next) {
+        gen_expr(gen, part);
+        switch (part->data_type) {
+          case DATA_INT:
+            printf("CALL $b_toStr_int\n");
+            break;
+          case DATA_DOUBLE:
+            printf("CALL $b_toStr_float\n");
+            break;
+          case DATA_BOOL:
+            printf("CALL $b_toStr_bool\n");
+            break;
+          case DATA_UNIT:
+            printf("POPS LF@tmp1\n");
+            printf("PUSHS string@()\n");
+            break;
+          default:
+            break;
+        }
+        printf("POPS LF@tmp1\n");
+        printf("POPS LF@tmp2\n");
+        printf("CONCAT LF@tmp3 LF@tmp2 LF@tmp1\n");
+        printf("PUSHS LF@tmp3\n");
+      }
+      break;
+
     case NODE_IF: {
       int i = new_label(gen);
 
@@ -225,67 +264,18 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       printf("PUSHS bool@false\n");
       printf("JUMPIFEQS xIF$%d$ELSE\n", i);
 
-      //then
-      for (AST_NODE *fn = node->right; fn != NULL; fn = fn->next) {
-        if (fn->next==NULL && node->data_type != DATA_UNIT) {
-          if (fn->type== NODE_IF) {
-            gen_expr(gen, fn);
-            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-          else if (fn->type==NODE_RETURN) {
-            gen_stmt(gen, fn);
-            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-          else {
-            gen_expr(gen,fn->left);
-            if (node->data_type==DATA_DOUBLE && fn->left->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-        }
-        else {
-          gen_stmt(gen, fn);
-        }
-      }
-
+      gen_block_value(gen, node->right, node->data_type);
       printf("JUMP xIF$%d$END\n", i);
-
-      //else
       printf("LABEL xIF$%d$ELSE\n", i);
-      for (AST_NODE *fn = node->third; fn != NULL; fn = fn->next) {
-        if (fn->next==NULL && node->data_type != DATA_UNIT) {
-          if (fn->type== NODE_IF) {
-            gen_expr(gen, fn);
-            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-          else if (fn->type==NODE_RETURN) {
-            gen_stmt(gen, fn);
-            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-          else {
-            gen_expr(gen,fn->left);
-            if (node->data_type==DATA_DOUBLE && fn->left->data_type==DATA_INT) {
-              printf("INT2FLOATS\n");
-            }
-          }
-        }
-        else {
-          gen_stmt(gen, fn);
-        }
-      }
+      gen_block_value(gen, node->third, node->data_type);
       printf("LABEL xIF$%d$END\n", i);
       break;
     }
 
     default:
       break;
+  }
+  if (node->int_to_double) {
+    printf("INT2FLOATS\n");
   }
 }

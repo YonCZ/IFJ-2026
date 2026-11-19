@@ -40,7 +40,8 @@ void lower_members(AST_NODE *root) {
         fn->is_method = false;
         fn->has_parens = true;
       }
-      else if (strcmp(fn->name,"length")==0) {
+      else if (strcmp(fn->name,"length")==0 &&
+               fn->left->data_type == DATA_STRING) {
         free(fn->name);
         ast_name(fn, "strLength");
         fn->third = fn->left;
@@ -48,7 +49,8 @@ void lower_members(AST_NODE *root) {
         fn->is_method = false;
         fn->has_parens = true;
       }
-      else if (strcmp(fn->name,"floor")==0) {
+      else if (strcmp(fn->name,"floor")==0 &&
+               fn->left->data_type == DATA_DOUBLE) {
         free(fn->name);
         ast_name(fn, "$floor");
         fn->third = fn->left;
@@ -56,7 +58,8 @@ void lower_members(AST_NODE *root) {
         fn->is_method = false;
         fn->has_parens = true;
       }
-      else if (strcmp(fn->name,"toInt")==0) {
+      else if (strcmp(fn->name,"toInt")==0 &&
+               fn->left->data_type == DATA_DOUBLE) {
         fn->third = fn->left;
         fn->left = NULL;
         fn->is_method = false;
@@ -198,23 +201,7 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   process_params(fn->third);
 
 
-  //processing block of code
-  //TODO zkontrolovat jestli tady bude moct byt left - je to uz druhe left (1. je v program init)
-  //TODO znamenalo by to program -> body -> function ale to prece nenamem
-  for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
-    if (node->next==NULL && fn->data_type != DATA_UNIT && node->type == NODE_EXPR_STMT) {
-      gen_expr(gen, node->left);
-    }
-    else if (node->next == NULL && fn->data_type != DATA_UNIT && node->type == NODE_IF) {
-      gen_expr(gen,node);
-    }
-    else {
-      gen_stmt(gen, node);
-    }
-  }
-
-  if (fn->data_type == DATA_UNIT) printf("PUSHS nil@nil\n");
-
+  gen_block_value(gen, fn->left, fn->data_type);
 
   printf("POPFRAME\n");
   printf("RETURN\n");

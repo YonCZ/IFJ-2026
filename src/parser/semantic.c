@@ -14,6 +14,7 @@ This file was developed with the help of the Gemini Hydrogen AI model.
 #include "scanner/error.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static char *dup_string(const char *src) {
     size_t len = strlen(src) + 1;
@@ -271,7 +272,7 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
             }
 
             bool explicit_ret = (curr->type_ref != NULL);
-            DATA_TYPE ret_type = explicit_ret ? curr->data_type : DATA_UNIT;
+            DATA_TYPE ret_type = explicit_ret ? curr->data_type : DATA_NONE;
             DATA_TYPE ret_elem = type_ref_elem(curr->type_ref);
             bool is_main = curr->is_main;
 
@@ -301,6 +302,7 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
             fn_info->param_count = p_count;
             fn_info->elem_type = ret_elem;
             fn_info->is_extension = curr->is_extension;
+            fn_info->fn_node = curr;
 
             size_t g_count = 0;
             for (AST_NODE *g = curr->third != NULL ? curr->third->next : NULL;
@@ -350,8 +352,8 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
 //druhy pruchod ast, samotna kontrola semantiky, odvozovani typu, kontrola kompatibility, kontrola return, kontrola volani funkci (chyby 3, 4, 5, 6, 7, 10)
 static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context);
 static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *context);
-static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, bool *guaranteed_return);
-static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, bool create_scope, bool *guaranteed_return);
+static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, bool value_needed, bool *guaranteed_return);
+static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, bool create_scope, bool value_needed, bool *guaranteed_return);
 
 /* Zkontroluje definici funkce, parametry, tělo a odvodí/ověří návratový typ (chyby 4, 6, 10) */
 static void analyze_function_def(AST_NODE *func_node, semantic_context_t *context) {
@@ -366,6 +368,13 @@ static void analyze_function_def(AST_NODE *func_node, semantic_context_t *contex
         return;
     }
 
+    if (fn_info->is_defined) {
+        return;
+    }
+    if (fn_info->analyzing) {
+        error_exit(ERROR_SEM_TYPE, func_node->line, func_node->name, "Recursive function needs an explicit return type.");
+    }
+    fn_info->analyzing = true;
     context->current_func = fn_info;
     context->in_function = true;
     newScope(context);
@@ -386,29 +395,11 @@ static void analyze_function_def(AST_NODE *func_node, semantic_context_t *contex
     DATA_TYPE body_type = DATA_UNIT;
 
     if (func_node->left != NULL) {
-        body_type = analyze_block(func_node->left, context, false, &guaranteed_return);
-    }
-
-    bool body_known = (func_node->left != NULL);
-
-    // Kontrola pravidel návratového typu (sekce 2.3 zadání)
-    if (!body_known) {
-        fn_info->is_defined = true;
-        freeScope(context);
-        context->current_func = NULL;
-        context->in_function = false;
-        return;
+        body_type = analyze_block(func_node->left, context, false, fn_info->data_type != DATA_UNIT, &guaranteed_return);
     }
 
     if (!fn_info->explicit_return) {
-        if (fn_info->has_return_stmt || fn_info->is_recursive) {
-            error_exit(ERROR_SEM_TYPE, func_node->line, func_node->name, "Return type must be explicit for recursive functions or functions using return.");
-            return;
-        }
-        if (body_type == DATA_BOOL) {
-            error_exit(ERROR_SEM_TYPE, func_node->line, func_node->name, "Function cannot infer Boolean return type.");
-            return;
-        }
+        func_node->data_type = body_type;
         fn_info->data_type = body_type; // Odvození návratového typu
     } else if (fn_info->data_type != DATA_UNIT) {
         // Explicitní návratový typ jiný než Unit: pokud není zaručen return, musí sedět typ posledního výrazu
@@ -421,10 +412,18 @@ static void analyze_function_def(AST_NODE *func_node, semantic_context_t *contex
         }
     }
 
+    fn_info->analyzing = false;
     fn_info->is_defined = true;
     freeScope(context);
     context->current_func = NULL;
     context->in_function = false;
+}
+
+static void infer_return_type(symbol_info_t *fn, semantic_context_t *context) {
+    if (fn->fn_node != NULL && !fn->explicit_return && !fn->is_defined) {
+        semantic_context_t callee = {.global_symtable = context->global_symtable};
+        analyze_function_def(fn->fn_node, &callee);
+    }
 }
 
 /* Zpracuje val/var definici proměnné (chyba 4 při redefinici v aktuálním bloku, chyba 6 při neshodě typů) */
@@ -456,6 +455,7 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
             error_exit(ERROR_SEM_TYPE, var_node->line, var_node->name, "Variable type mismatch.");
             return;
         }
+        var_node->left->int_to_double = needs_conv;
         final_type = var_node->data_type;
         final_elem = type_ref_elem(var_node->type_ref);
         if (final_type == DATA_LIST && final_elem != DATA_NONE &&
@@ -505,10 +505,11 @@ static void analyze_assign(AST_NODE *assign_node, semantic_context_t *context) {
         error_exit(ERROR_SEM_TYPE, assign_node->line, assign_node->left->name, "Type mismatch in assignment.");
         return;
     }
+    assign_node->right->int_to_double = needs_conv;
 }
 
 /* Zpracuje if-else (podmínka Boolean, oba bloky nové scopes, pravidla returnu) */
-static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context, bool *guaranteed_return) {
+static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context, bool value_needed, bool *guaranteed_return) {
     DATA_TYPE cond_type = analyze_expression(if_node->left, context);
     if (cond_type != DATA_BOOL && cond_type != DATA_NONE) {
         error_exit(ERROR_SEM_TYPE, if_node->line, "if", "Condition in if statement must be Boolean.");
@@ -518,20 +519,30 @@ static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context, bool
     bool then_ret = false;
     bool else_ret = false;
 
-    DATA_TYPE then_type = analyze_block(if_node->right, context, true, &then_ret);
-    DATA_TYPE else_type = analyze_block(if_node->third, context, true, &else_ret);
+    DATA_TYPE then_type = analyze_block(if_node->right, context, true, value_needed, &then_ret);
+    DATA_TYPE else_type = analyze_block(if_node->third, context, true, value_needed, &else_ret);
 
     if (guaranteed_return != NULL) {
         *guaranteed_return = (then_ret && else_ret);
     }
 
-    if (then_type == else_type) {
-        return then_type;
+    DATA_TYPE result = DATA_UNIT;
+    if (value_needed) {
+        if (then_ret || then_type == else_type) {
+            result = else_type;
+        } else if (else_ret) {
+            result = then_type;
+        } else if ((then_type == DATA_INT && else_type == DATA_DOUBLE) ||
+                   (then_type == DATA_DOUBLE && else_type == DATA_INT)) {
+            result = DATA_DOUBLE;
+        } else if (then_type == DATA_NONE || else_type == DATA_NONE) {
+            result = DATA_NONE;
+        } else {
+            error_exit(ERROR_SEM_TYPE, if_node->line, "if", "Branches have incompatible types.");
+        }
     }
-    if (then_type == DATA_NONE || else_type == DATA_NONE) {
-        return DATA_NONE;
-    }
-    return DATA_UNIT;
+    if_node->data_type = result;
+    return result;
 }
 
 /* Zpracuje while (podmínka Boolean, tělo nový scope, výsledek cyklu je Unit) */
@@ -546,7 +557,7 @@ static void analyze_while(AST_NODE *while_node, semantic_context_t *context) {
     context->in_loop = true;
 
     bool body_ret = false;
-    analyze_block(while_node->right, context, true, &body_ret);
+    analyze_block(while_node->right, context, true, false, &body_ret);
 
     context->in_loop = prev_in_loop;
 }
@@ -557,8 +568,6 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
         error_exit(ERROR_SEM_OTHER, ret_node->line, "return", "Return statement outside of function.");
         return;
     }
-
-    context->current_func->has_return_stmt = true;
 
     if (!context->current_func->explicit_return) {
         error_exit(ERROR_SEM_TYPE, ret_node->line, context->current_func->name, "Return statement requires explicit function return type.");
@@ -625,41 +634,89 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
             }
         } else if (strcmp(call->name, "toString") == 0 || strcmp(call->name, "toStr") == 0) {
             result = DATA_STRING;
-        } else if (strcmp(call->name, "length") == 0 || strcmp(call->name, "toInt") == 0) {
+        } else if (strcmp(call->name, "length") == 0 &&
+                   (recv_type == DATA_STRING || recv_type == DATA_NONE)) {
             result = DATA_INT;
-        } else if (strcmp(call->name, "floor") == 0) {
+        } else if (strcmp(call->name, "toInt") == 0 &&
+                   (recv_type == DATA_DOUBLE || recv_type == DATA_NONE)) {
+            result = DATA_INT;
+        } else if (strcmp(call->name, "floor") == 0 &&
+                   (recv_type == DATA_DOUBLE || recv_type == DATA_NONE)) {
             result = DATA_DOUBLE;
         }
 
         if (result == DATA_NONE) {
+            char *key = ast_method_key(call->name, recv_type);
             symbol_info_t *ext = (symbol_info_t *)symtableSearch(
-                &context->global_symtable, call->name);
+                &context->global_symtable, key);
+            if (ext == NULL && recv_type == DATA_INT) {
+                char *alt_key = ast_method_key(call->name, DATA_DOUBLE);
+                symbol_info_t *alt = (symbol_info_t *)symtableSearch(
+                    &context->global_symtable, alt_key);
+                if (alt != NULL && alt->kind == SYM_FUNC && alt->is_extension &&
+                    alt->param_count > 0 && alt->params[0].type == DATA_DOUBLE) {
+                    ext = alt;
+                    free(key);
+                    key = alt_key;
+                    alt_key = NULL;
+                }
+                free(alt_key);
+            }
             if (ext != NULL && ext->kind == SYM_FUNC && ext->is_extension) {
+                size_t expected_groups = ext->group_count > 0 ? ext->group_count - 1 : 0;
+                size_t call_groups = call->has_parens ? 1 : 0;
+                if (call_groups != expected_groups) {
+                    error_exit(ERROR_SEM_ARG, call->line, call->name,
+                               "Wrong number of argument lists in method call.");
+                    return DATA_UNIT;
+                }
                 size_t arg_count = 0;
                 for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
                     arg_count++;
                 }
-                if (ext->param_count == 0 || arg_count + 1 != ext->param_count) {
+                if (arg_count + 1 != ext->param_count) {
                     error_exit(ERROR_SEM_ARG, call->line, call->name,
                                "Wrong number of arguments in method call.");
                     return DATA_UNIT;
                 }
-                if (!is_type_compatible(ext->params[0].type, recv_type, NULL)) {
+                if (expected_groups == 1 && ext->group_counts != NULL &&
+                    arg_count != ext->group_counts[1]) {
+                    error_exit(ERROR_SEM_ARG, call->line, call->name,
+                               "Wrong number of arguments in one list.");
+                    return DATA_UNIT;
+                }
+                bool recv_conv = false;
+                if (!is_type_compatible(ext->params[0].type, recv_type, &recv_conv)) {
                     error_exit(ERROR_SEM_ARG, call->line, call->name,
                                "Incompatible receiver type.");
                     return DATA_UNIT;
                 }
+                if (recv_conv && call->left != NULL) {
+                    call->left->int_to_double = true;
+                }
                 size_t idx = 1;
                 for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next, idx++) {
-                    DATA_TYPE arg_type = analyze_expression(arg, context);
-                    if (!is_type_compatible(ext->params[idx].type, arg_type, NULL)) {
+                    bool arg_conv = false;
+                    if (!is_type_compatible(ext->params[idx].type, arg->data_type, &arg_conv)) {
                         error_exit(ERROR_SEM_ARG, arg->line, call->name,
                                    "Incompatible argument type.");
                         return DATA_UNIT;
                     }
+                    if (arg_conv) {
+                        arg->int_to_double = true;
+                    }
                 }
+                infer_return_type(ext, context);
                 result = ext->data_type;
+                result_elem = ext->elem_type;
+                free(call->name);
+                ast_name(call, key);
+            } else if (recv_type != DATA_NONE) {
+                free(key);
+                error_exit(ERROR_SEM_UNDEF, call->line, call->name, "Undefined method.");
+                return DATA_UNIT;
             }
+            free(key);
         }
         call->data_type = result;
         call->elem_type = result_elem;
@@ -694,11 +751,6 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
     if (fn == NULL || fn->kind != SYM_FUNC || fn->is_extension) {
         error_exit(ERROR_SEM_UNDEF, call->line, call->name, "Call to undefined function.");
         return DATA_UNIT;
-    }
-
-    // Označení přímé rekurze (u nepřímé lze doplnit graf volání nebo kontrolovat explicit_return)
-    if (context->current_func != NULL && strcmp(context->current_func->name, fn->name) == 0) {
-        context->current_func->is_recursive = true;
     }
 
     size_t call_groups = 0;
@@ -771,22 +823,31 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
         for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next) {
             for (AST_NODE *arg = g->left; arg != NULL; arg = arg->next, idx++) {
                 DATA_TYPE arg_type = analyze_expression(arg, context);
-                if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, NULL)) {
+                bool conv = false;
+                if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, &conv)) {
                     error_exit(ERROR_SEM_ARG, arg->line, call->name, "Incompatible argument type.");
                     return DATA_UNIT;
+                }
+                if (!is_any_builtin && conv) {
+                    arg->int_to_double = true;
                 }
             }
         }
     } else {
         for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next, idx++) {
             DATA_TYPE arg_type = analyze_expression(arg, context);
-            if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, NULL)) {
+            bool conv = false;
+            if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, &conv)) {
                 error_exit(ERROR_SEM_ARG, arg->line, call->name, "Incompatible argument type.");
                 return DATA_UNIT;
+            }
+            if (!is_any_builtin && conv) {
+                arg->int_to_double = true;
             }
         }
     }
 
+    infer_return_type(fn, context);
     call->data_type = fn->data_type;
     call->elem_type = fn->elem_type;
     return fn->data_type;
@@ -854,7 +915,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
                     }
                 }
                 bool branch_ret = false;
-                DATA_TYPE branch_t = analyze_block(branch->third, context, false, &branch_ret);
+                DATA_TYPE branch_t = analyze_block(branch->third, context, false, true, &branch_ret);
                 if (first) {
                     result = branch_t;
                     first = false;
@@ -871,30 +932,32 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
             return result;
         }
 
-        case NODE_IF: {
-            DATA_TYPE cond_t = analyze_expression(expr->left, context);
-            if (cond_t != DATA_BOOL && cond_t != DATA_NONE) {
-                error_exit(ERROR_SEM_TYPE, expr->line, "if", "Condition in if expression must be Boolean.");
-                return DATA_UNIT;
-            }
-            bool then_ret = false;
-            bool else_ret = false;
-            DATA_TYPE then_t = analyze_block(expr->right, context, true, &then_ret);
-            DATA_TYPE else_t = analyze_block(expr->third, context, true, &else_ret);
-            DATA_TYPE result = (then_t == else_t) ? then_t : DATA_NONE;
-            expr->data_type = result;
-            return result;
-        }
+        case NODE_IF:
+            return analyze_if(expr, context, true, NULL);
 
         case NODE_RANGE: {
+            DATA_TYPE from_t = DATA_NONE;
+            DATA_TYPE to_t = DATA_NONE;
+            DATA_TYPE step_t = DATA_NONE;
             if (expr->left != NULL) {
-                analyze_expression(expr->left, context);
+                from_t = analyze_expression(expr->left, context);
             }
             if (expr->right != NULL) {
-                analyze_expression(expr->right, context);
+                to_t = analyze_expression(expr->right, context);
             }
             if (expr->third != NULL) {
-                analyze_expression(expr->third, context);
+                step_t = analyze_expression(expr->third, context);
+            }
+            if ((from_t != DATA_INT && from_t != DATA_NONE) ||
+                (to_t != DATA_INT && to_t != DATA_NONE) ||
+                (step_t != DATA_INT && step_t != DATA_NONE)) {
+                error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range bounds and step must be Int.");
+                return DATA_UNIT;
+            }
+            if (expr->third != NULL && expr->third->type == NODE_LITERAL &&
+                expr->third->data_type == DATA_INT && expr->third->ival == 0) {
+                error_exit(ERROR_SEM_OTHER, expr->line, "range", "Range step must not be zero.");
+                return DATA_UNIT;
             }
             expr->data_type = DATA_LIST;
             expr->elem_type = DATA_INT;
@@ -919,7 +982,9 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
                     expr->third = NULL;
                     expr->is_method = false;
                     expr->has_parens = false;
+                    infer_return_type(fn, context);
                     expr->data_type = fn->data_type;
+                    expr->elem_type = fn->elem_type;
                     return fn->data_type;
                 }
                 error_exit(ERROR_SEM_UNDEF, expr->line, expr->name, "Use of undefined variable.");
@@ -1017,6 +1082,11 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
                             error_exit(ERROR_SEM_TYPE, expr->line, "range", "Step requires a range.");
                             return DATA_UNIT;
                         }
+                        if (expr->right->type == NODE_LITERAL &&
+                            expr->right->data_type == DATA_INT && expr->right->ival == 0) {
+                            error_exit(ERROR_SEM_OTHER, expr->line, "range", "Range step must not be zero.");
+                            return DATA_UNIT;
+                        }
                     } else if (left_t != DATA_INT && left_t != DATA_NONE) {
                         error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range start must be Int.");
                         return DATA_UNIT;
@@ -1058,7 +1128,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
 }
 
 /* Zpracuje jeden příkaz a vrátí jeho výsledný typ */
-static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, bool *guaranteed_return) {
+static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, bool value_needed, bool *guaranteed_return) {
     if (stmt == NULL) {
         return DATA_UNIT;
     }
@@ -1073,7 +1143,7 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, 
             return DATA_UNIT;
 
         case NODE_IF:
-            return analyze_if(stmt, context, guaranteed_return);
+            return analyze_if(stmt, context, value_needed, guaranteed_return);
 
         case NODE_WHILE:
             analyze_while(stmt, context);
@@ -1109,14 +1179,18 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, 
             }
             newScope(context);
             if (stmt->name != NULL) {
-                symbol_info_t *var_sym = create_var_symbol(stmt->name, loop_type, false, stmt->id);
+                symbol_info_t *var_sym = create_var_symbol(stmt->name, loop_type, true, stmt->id);
                 symtableInsert(&context->current_scope->symtable, stmt->name, var_sym);
             }
             for (AST_NODE *guard = stmt->third; guard != NULL; guard = guard->next) {
-                analyze_expression(guard, context);
+                DATA_TYPE guard_t = analyze_expression(guard, context);
+                if (guard_t != DATA_BOOL && guard_t != DATA_NONE) {
+                    error_exit(ERROR_SEM_TYPE, guard->line, "for", "For guard must be Boolean.");
+                    return DATA_UNIT;
+                }
             }
             bool body_ret = false;
-            analyze_block(stmt->right, context, false, &body_ret);
+            analyze_block(stmt->right, context, false, false, &body_ret);
             freeScope(context);
             return DATA_UNIT;
         }
@@ -1133,7 +1207,7 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, 
 }
 
 /* Projde řetěz příkazů v bloku (node->next) a vrátí typ posledního příkazu */
-static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, bool create_scope, bool *guaranteed_return) {
+static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, bool create_scope, bool value_needed, bool *guaranteed_return) {
     if (block == NULL) {
         return DATA_UNIT;
     }
@@ -1147,7 +1221,7 @@ static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, boo
 
     while (stmt != NULL) {
         bool stmt_returns = false;
-        last_type = analyze_statement(stmt, context, &stmt_returns);
+        last_type = analyze_statement(stmt, context, value_needed && stmt->next == NULL, &stmt_returns);
         if (stmt_returns && guaranteed_return != NULL) {
             *guaranteed_return = true;
         }
@@ -1159,6 +1233,30 @@ static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context, boo
     }
 
     return last_type;
+}
+
+static bool calls_itself(AST_NODE *node, AST_NODE *origin, semantic_context_t *context) {
+    for (; node != NULL; node = node->next) {
+        if (node->type == NODE_CALL && !node->is_index) {
+            symbol_info_t *fn = symtableSearch(&context->global_symtable, node->name);
+            if (fn != NULL && fn->fn_node != NULL && fn->is_extension == node->is_method) {
+                if (fn->fn_node == origin) {
+                    return true;
+                }
+                if (fn->visited_from != origin) {
+                    fn->visited_from = origin;
+                    if (calls_itself(fn->fn_node->left, origin, context)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if (calls_itself(node->left, origin, context) || calls_itself(node->right, origin, context) ||
+            calls_itself(node->third, origin, context) || calls_itself(node->arg_groups, origin, context)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void semantic_analyze(AST_NODE *root) {
@@ -1181,6 +1279,13 @@ void semantic_analyze(AST_NODE *root) {
         curr = curr->next;
     }
     
+
+    for (curr = root->left; curr != NULL; curr = curr->next) {
+        if (curr->type == NODE_FUNC_DEF && curr->type_ref == NULL &&
+            calls_itself(curr->left, curr, &context)) {
+            error_exit(ERROR_SEM_TYPE, curr->line, curr->name, "Recursive function needs an explicit return type.");
+        }
+    }
 
     // Úklid globální tabulky symbolů
     size_t size_of_global_symtable = context.global_symtable.size;

@@ -389,6 +389,18 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
             continue;
         }
 
+        if (expecting_operand && input.type == IF_TOKEN) {
+            AST_NODE *node = parser_parse_if_expr(true);
+            stack_push(stack, (StackSymbol){
+                .kind = STACK_NONTERMINAL,
+                .token = 0,
+                .node = node
+            });
+            expecting_operand = false;
+            input = parser_peek();
+            continue;
+        }
+
         if (expecting_operand && input.type == INTERP_START_TOKEN) {
             AST_NODE *node = parser_parse_interp();
             stack_push(stack, (StackSymbol){

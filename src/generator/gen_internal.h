@@ -32,6 +32,8 @@ void emit(Gen *gen, char *label);
 void emit_string_literal(Gen *gem, char *str);
 
 
+void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result);
+
 void push_to_val(AST_NODE *node);
 void pop_to_val(AST_NODE *node);
 
