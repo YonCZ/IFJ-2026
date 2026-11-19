@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project IFJ2026
+author: lucie alexandrova
+login: xalexal00
+part of project ifj2026
 */
 #ifndef SEMANTIC_H
 #define SEMANTIC_H
@@ -19,54 +19,56 @@ typedef enum {
 typedef struct {
     char *name;
     DATA_TYPE type;
+    int id;
 } param_info_t;
 
-/* Záznam ukládaný do void *value ve tvé symtable_t */
+/*record stored in void *value in symtable_t*/
 typedef struct {
     symbol_kind_t kind;
     char *name;
-    DATA_TYPE data_type;      // U proměnné její typ; u funkce návratový typ
-    bool is_const;            // true pro val a parametry funkce, false pro var
+    DATA_TYPE data_type;      //variable type or function return type
+    bool is_const;            //true for val and function parameters, false for var
 
-    /* Položky pro funkce (kind == SYM_FUNC) */
-    bool is_main;             // true pro @main
-    bool is_defined;          // true po kontrole těla funkce
-    bool explicit_return;     // true, pokud byl návratový typ uveden v hlavičce
-    bool is_recursive;        // true, pokud funkce volá samu sebe
-    bool has_return_stmt;     // true, pokud tělo obsahuje příkaz return
-    bool is_builtin;          // true pro vestavěné funkce
-    param_info_t *params;     // Pole parametrů
-    size_t param_count;       // Počet parametrů
+    /*function fields (kind == SYM_FUNC)*/
+    bool is_main;             //true for @main
+    bool is_defined;          //true after checking the function body
+    bool explicit_return;     //true when the return type was given in the header
+    bool is_recursive;        //true when the function calls itself
+    bool has_return_stmt;     //true when the body contains a return statement
+    bool is_builtin;          //true for built-in functions
+    int id;                   //unique variable id for the generator
+    param_info_t *params;     //parameter array
+    size_t param_count;       //number of parameters
 } symbol_info_t;
 
-/* Položka zásobníku lokálních rozsahů platnosti (pro shadowing a bloky) */
+/*stack item for local scopes (for shadowing and blocks)*/
 typedef struct scope_node {
     symtable_t symtable;
     int scope_id;
     struct scope_node *parent;
 } scope_node_t;
 
-/* Kontext sémantické analýzy */
+/*semantic analysis context*/
 typedef struct {
-    symtable_t global_symtable; // Globální tabulka funkcí
-    scope_node_t *current_scope; // Vrchol zásobníku lokálních bloků (místo jedné symtable*)
-    symbol_info_t *current_func; // Právě analyzovaná funkce
+    symtable_t global_symtable; //global function table
+    scope_node_t *current_scope; //top of the local block stack
+    symbol_info_t *current_func; //currently analyzed function
     bool in_function;
     bool in_loop;
     int next_scope_id;
     bool has_main;
 } semantic_context_t;
 
-/* Hlavní vstupní bod volaný z main.c nad kořenem AST */
+/*main entry point called from main.c on the AST root*/
 void semantic_analyze(AST_NODE *root);
 
-/* Správa rozsahů platnosti (scopes) */
+/*scope management*/
 void newScope(semantic_context_t *context);
 void freeScope(semantic_context_t *context);
 
-/* Vyhledávání a kontrola deklarací */
+/*declaration lookup and checks*/
 symbol_info_t *findInScope(semantic_context_t *context, const char *name);
 bool is_variable_declared(symtable_t *symtable, const char *name);
 bool is_function_declared(symtable_t *symtable, const char *name);
 
-#endif // SEMANTIC_H
+#endif //semantic_h
