@@ -283,6 +283,7 @@ void free_AST(AST_NODE *node) {
   free_AST(node->next);
   free_AST(node->third);
   free_AST(node->type_ref);
+  free_AST(node->arg_groups);
   free(node->name);
   free(node->sval);
   free(node);
@@ -441,7 +442,8 @@ static void print_node_text(FILE *out, const AST_NODE *n) {
       if (n->data_type != DATA_NONE) fprintf(out, " : %s", data_type_name(n->data_type));
       break;
     case NODE_CALL:
-      fprintf(out, "CALL %s%s", n->name ? n->name : "?", n->is_method ? " (metoda)" : "");
+      fprintf(out, "CALL %s%s%s", n->name ? n->name : "?",
+              n->is_method ? " (metoda)" : "", n->is_index ? " (index)" : "");
       if (n->data_type != DATA_NONE) fprintf(out, " : %s", data_type_name(n->data_type));
       break;
     case NODE_RANGE:

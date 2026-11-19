@@ -111,15 +111,18 @@ struct AST_NODE{
   AST_NODE *third;
   AST_NODE *next;
   AST_NODE *type_ref;
+  AST_NODE *arg_groups;
 
   bool is_const; //only for NODE_DEF_VAR
   int line;  //error line, PARSER will define it
   bool is_main;
 
   DATA_TYPE data_type;
+  DATA_TYPE elem_type;
   OP_TYPE op_type;
 
   bool is_extension; //extkw
+  bool is_index;
 
   /*
    *is_method=true

@@ -19,6 +19,7 @@ typedef enum {
 typedef struct {
     char *name;
     DATA_TYPE type;
+    DATA_TYPE elem_type;
     int id;
 } param_info_t;
 
@@ -27,6 +28,7 @@ typedef struct {
     symbol_kind_t kind;
     char *name;
     DATA_TYPE data_type;      // U proměnné její typ; u funkce návratový typ
+    DATA_TYPE elem_type;      // Typ prvku, pokud je proměnná seznam
     bool is_const;            // true pro val a parametry funkce, false pro var
 
     /* Položky pro funkce (kind == SYM_FUNC) */
@@ -36,9 +38,12 @@ typedef struct {
     bool is_recursive;        // true, pokud funkce volá samu sebe
     bool has_return_stmt;     // true, pokud tělo obsahuje příkaz return
     bool is_builtin;          // true pro vestavěné funkce
+    bool is_extension;        // true pro metodu z extension bloku
     int id;                   // unikátní id proměnné pro generátor
     param_info_t *params;     // Pole parametrů
     size_t param_count;       // Počet parametrů
+    size_t group_count;       // Počet skupin parametrů
+    size_t *group_counts;     // Počet parametrů v jednotlivých skupinách
 } symbol_info_t;
 
 /* Položka zásobníku lokálních rozsahů platnosti (pro shadowing a bloky) */

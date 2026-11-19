@@ -69,6 +69,8 @@ static bool is_expression_end(Tokens type) {
            type == ELSE_TOKEN ||
            type == DO_TOKEN ||
            type == EOL_TOKEN ||
+           type == MATCH_TOKEN ||
+           type == ARROW_FAT_TOKEN ||
            type == RBRACE_TOKEN ||
            type == EOF_TOKEN;
 }
@@ -303,6 +305,14 @@ static AST_NODE *pop_postfix_operand(Stack *stack, int line) {
     return node;
 }
 
+static int count_arg_chain(AST_NODE *arg) {
+    int count = 0;
+    for (; arg != NULL; arg = arg->next) {
+        count++;
+    }
+    return count;
+}
+
 static AST_NODE *parse_call_args(void) {
     expect_token(LPAR_TOKEN);
     if (parser_peek().type == RPAR_TOKEN) {
@@ -401,6 +411,25 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
             } else if (callee->type == NODE_CALL && callee->is_method &&
                        !callee->has_parens) {
                 callee->third = params;
+                callee->has_parens = true;
+                call = callee;
+            } else if (callee->type == NODE_CALL && !callee->is_method) {
+                AST_NODE *group = ast_create_param_list(params, NULL,
+                                                        count_arg_chain(params));
+                if (callee->arg_groups == NULL) {
+                    AST_NODE *first = ast_create_param_list(callee->third, NULL,
+                                                            count_arg_chain(callee->third));
+                    first->next = group;
+                    callee->arg_groups = ast_create_params_list_of_list(first, 2);
+                    callee->third = NULL;
+                } else {
+                    AST_NODE *last = callee->arg_groups->next;
+                    while (last->next != NULL) {
+                        last = last->next;
+                    }
+                    last->next = group;
+                    callee->arg_groups->param_groups++;
+                }
                 callee->has_parens = true;
                 call = callee;
             } else {

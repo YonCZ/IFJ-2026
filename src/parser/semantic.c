@@ -15,6 +15,16 @@ This file was developed with the help of the Gemini Hydrogen AI model.
 #include <stdlib.h>
 #include <string.h>
 
+static char *dup_string(const char *src) {
+    size_t len = strlen(src) + 1;
+    char *copy = malloc(len);
+    if (copy == NULL) {
+        error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for string.");
+    }
+    memcpy(copy, src, len);
+    return copy;
+}
+
 void newScope(semantic_context_t *context) {
     scope_node_t *new_scope = calloc(1, sizeof(scope_node_t));
     if (new_scope == NULL) {
@@ -72,7 +82,7 @@ static symbol_info_t *create_var_symbol(const char *name, DATA_TYPE type, bool i
         return NULL;
     }
     info->kind = SYM_VAR;
-    info->name = strdup(name);
+    info->name = dup_string(name);
     info->data_type = type;
     info->is_const = is_const;
     info->id = id; // true for val and function parameters, false for var
@@ -86,7 +96,7 @@ static symbol_info_t *create_func_symbol(const char *name, DATA_TYPE ret_type, b
         return NULL;
     }
     info->kind = SYM_FUNC;
-    info->name = strdup(name);
+    info->name = dup_string(name);
     info->data_type = ret_type;
     info->is_const = false; // Functions are not constants
     info->explicit_return = explicit_ret;
@@ -102,6 +112,13 @@ static void free_symbol(symbol_info_t *info) {
     }
 }
 
+static DATA_TYPE type_ref_elem(AST_NODE *type) {
+    if (type == NULL || type->data_type != DATA_LIST || type->left == NULL) {
+        return DATA_NONE;
+    }
+    return type->left->data_type;
+}
+
 /* Ověří kompatibilitu typů včetně implicitní konverze Int -> Double */
 static bool is_type_compatible(DATA_TYPE target, DATA_TYPE source, bool *needs_int_to_double) {
     if (target == DATA_NONE || source == DATA_NONE) {
@@ -112,11 +129,15 @@ static bool is_type_compatible(DATA_TYPE target, DATA_TYPE source, bool *needs_i
         return true;
     }
     if (target == source) {
-        *needs_int_to_double = false;
+        if (needs_int_to_double != NULL) {
+            *needs_int_to_double = false;
+        }
         return true;
     }
     if (target == DATA_DOUBLE && source == DATA_INT) {
-        *needs_int_to_double = true;
+        if (needs_int_to_double != NULL) {
+            *needs_int_to_double = true;
+        }
         return true;
     }
     return false;
@@ -126,6 +147,13 @@ static bool is_type_compatible(DATA_TYPE target, DATA_TYPE source, bool *needs_i
 /* Pomocná funkce pro přiřazení parametrů vestavěným funkcím */
 static void set_builtin_params(symbol_info_t *fn, size_t count, const DATA_TYPE *types) {
     fn->param_count = count;
+    fn->group_count = 1;
+    fn->group_counts = malloc(sizeof(size_t));
+    if (fn->group_counts == NULL) {
+        error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for group counts.");
+        return;
+    }
+    fn->group_counts[0] = count;
     if (count == 0) {
         fn->params = NULL;
         return;
@@ -151,12 +179,15 @@ static void register_builtin_functions(semantic_context_t *context) {
     symtableInsert(&context->global_symtable, "print", fn);
 
     fn = create_func_symbol("readLine", DATA_STRING, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readLine", fn);
 
     fn = create_func_symbol("readInt", DATA_INT, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readInt", fn);
 
     fn = create_func_symbol("readDouble", DATA_DOUBLE, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readDouble", fn);
 
     // toStr(value: Any): String
@@ -185,12 +216,15 @@ static void register_builtin_functions(semantic_context_t *context) {
     symtableInsert(&context->global_symtable, "chr", fn);
 
     fn = create_func_symbol("readBoolean", DATA_BOOL, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readBoolean", fn);
 
     fn = create_func_symbol("readIntMaybe", DATA_NONE, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readIntMaybe", fn);
 
     fn = create_func_symbol("readDoubleMaybe", DATA_NONE, true, false, true);
+    set_builtin_params(fn, 0, NULL);
     symtableInsert(&context->global_symtable, "readDoubleMaybe", fn);
 
     fn = create_func_symbol("List", DATA_LIST, true, false, true);
@@ -206,6 +240,13 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
             symbol_info_t *ctor = create_func_symbol(curr->name, DATA_NONE, true, false, false);
             size_t count = curr->third != NULL ? (size_t)curr->third->param_cnt : 0;
             ctor->param_count = count;
+            ctor->group_count = 1;
+            ctor->group_counts = malloc(sizeof(size_t));
+            if (ctor->group_counts == NULL) {
+                error_exit(ERROR_INTERNAL, curr->line, curr->name, "Memory allocation failed for group counts.");
+                return;
+            }
+            ctor->group_counts[0] = count;
             if (count > 0) {
                 ctor->params = calloc(count, sizeof(param_info_t));
                 if (ctor->params == NULL) {
@@ -214,7 +255,7 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
                 }
                 size_t idx = 0;
                 for (AST_NODE *p = curr->third->left; p != NULL && idx < count; p = p->next, idx++) {
-                    ctor->params[idx].name = strdup(p->name);
+                    ctor->params[idx].name = dup_string(p->name);
                     ctor->params[idx].type = p->data_type;
                     ctor->params[idx].id = p->id;
                 }
@@ -231,6 +272,7 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
 
             bool explicit_ret = (curr->type_ref != NULL);
             DATA_TYPE ret_type = explicit_ret ? curr->data_type : DATA_UNIT;
+            DATA_TYPE ret_elem = type_ref_elem(curr->type_ref);
             bool is_main = curr->is_main;
 
             size_t p_count = 0;
@@ -257,6 +299,26 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
 
             symbol_info_t *fn_info = create_func_symbol(curr->name, ret_type, explicit_ret, is_main, false);
             fn_info->param_count = p_count;
+            fn_info->elem_type = ret_elem;
+            fn_info->is_extension = curr->is_extension;
+
+            size_t g_count = 0;
+            for (AST_NODE *g = curr->third != NULL ? curr->third->next : NULL;
+                 g != NULL; g = g->next) {
+                g_count++;
+            }
+            fn_info->group_count = g_count;
+            if (g_count > 0) {
+                fn_info->group_counts = malloc(sizeof(size_t) * g_count);
+                if (fn_info->group_counts == NULL) {
+                    error_exit(ERROR_INTERNAL, curr->line, curr->name, "Memory allocation failed for group counts.");
+                    return;
+                }
+                size_t gi = 0;
+                for (AST_NODE *g = curr->third->next; g != NULL; g = g->next, gi++) {
+                    fn_info->group_counts[gi] = (size_t)g->param_cnt;
+                }
+            }
             if (p_count > 0) {
                 fn_info->params = malloc(sizeof(param_info_t) * p_count);
                 if (fn_info->params == NULL) {
@@ -267,8 +329,9 @@ static void collect_global_functions(AST_NODE *root, semantic_context_t *context
                 for (AST_NODE *g = curr->third != NULL ? curr->third->next : NULL;
                      g != NULL; g = g->next) {
                     for (AST_NODE *p = g->left; p != NULL; p = p->next, idx++) {
-                        fn_info->params[idx].name = strdup(p->name);
+                        fn_info->params[idx].name = dup_string(p->name);
                         fn_info->params[idx].type = p->data_type;
+                        fn_info->params[idx].elem_type = type_ref_elem(p->type_ref);
                         fn_info->params[idx].id = p->id;
                     }
                 }
@@ -315,6 +378,7 @@ static void analyze_function_def(AST_NODE *func_node, semantic_context_t *contex
         }
         symbol_info_t *param_sym = create_var_symbol(fn_info->params[i].name, fn_info->params[i].type,
                                                      true, fn_info->params[i].id);
+        param_sym->elem_type = fn_info->params[i].elem_type;
         symtableInsert(&context->current_scope->symtable, fn_info->params[i].name, param_sym);
     }
 
@@ -374,6 +438,7 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
         DATA_TYPE declared = var_node->type_ref != NULL ? var_node->data_type : DATA_NONE;
         symbol_info_t *var_sym = create_var_symbol(var_node->name, declared, var_node->is_const,
                                                     var_node->id);
+        var_sym->elem_type = type_ref_elem(var_node->type_ref);
         symtableInsert(&context->current_scope->symtable, var_node->name, var_sym);
         return;
     }
@@ -381,8 +446,10 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
     DATA_TYPE init_type = (var_node->left->type == NODE_CALL)
                           ? analyze_function_call(var_node->left, context)
                           : analyze_expression(var_node->left, context);
+    DATA_TYPE init_elem = var_node->left->elem_type;
 
     DATA_TYPE final_type = init_type;
+    DATA_TYPE final_elem = init_elem;
     if (var_node->type_ref != NULL && var_node->data_type != DATA_NONE) {
         bool needs_conv = false;
         if (!is_type_compatible(var_node->data_type, init_type, &needs_conv)) {
@@ -390,10 +457,17 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
             return;
         }
         final_type = var_node->data_type;
+        final_elem = type_ref_elem(var_node->type_ref);
+        if (final_type == DATA_LIST && final_elem != DATA_NONE &&
+            init_elem != DATA_NONE && final_elem != init_elem) {
+            error_exit(ERROR_SEM_TYPE, var_node->line, var_node->name, "List element type mismatch.");
+            return;
+        }
     }
 
     symbol_info_t *var_sym = create_var_symbol(var_node->name, final_type, var_node->is_const,
                                                 var_node->id);
+    var_sym->elem_type = final_elem;
     symtableInsert(&context->current_scope->symtable, var_node->name, var_sym);
 }
 
@@ -520,26 +594,104 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
 /* Zpracuje volání funkce jako příkaz nebo výraz na pravé straně (chyby 3, 5) */
 static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *context) {
     if (call->is_method) {
+        DATA_TYPE recv_type = DATA_NONE;
+        DATA_TYPE recv_elem = DATA_NONE;
         if (call->left != NULL) {
-            analyze_expression(call->left, context);
+            recv_type = analyze_expression(call->left, context);
+            recv_elem = call->left->elem_type;
         }
         for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
             analyze_expression(arg, context);
         }
         DATA_TYPE result = DATA_NONE;
-        if (strcmp(call->name, "toString") == 0 || strcmp(call->name, "toStr") == 0) {
+        DATA_TYPE result_elem = DATA_NONE;
+        if (recv_type == DATA_LIST) {
+            if (strcmp(call->name, "toString") == 0 || strcmp(call->name, "toStr") == 0) {
+                result = DATA_STRING;
+            } else if (strcmp(call->name, "length") == 0) {
+                result = DATA_INT;
+            } else if (strcmp(call->name, "head") == 0) {
+                result = recv_elem;
+            } else if (strcmp(call->name, "tail") == 0 ||
+                       strcmp(call->name, "drop") == 0 ||
+                       strcmp(call->name, "take") == 0 ||
+                       strcmp(call->name, "slice") == 0 ||
+                       strcmp(call->name, "toList") == 0) {
+                result = DATA_LIST;
+                result_elem = recv_elem;
+            } else if (strcmp(call->name, "range") == 0) {
+                result = DATA_LIST;
+                result_elem = DATA_INT;
+            }
+        } else if (strcmp(call->name, "toString") == 0 || strcmp(call->name, "toStr") == 0) {
             result = DATA_STRING;
         } else if (strcmp(call->name, "length") == 0 || strcmp(call->name, "toInt") == 0) {
             result = DATA_INT;
         } else if (strcmp(call->name, "floor") == 0) {
             result = DATA_DOUBLE;
         }
+
+        if (result == DATA_NONE) {
+            symbol_info_t *ext = (symbol_info_t *)symtableSearch(
+                &context->global_symtable, call->name);
+            if (ext != NULL && ext->kind == SYM_FUNC && ext->is_extension) {
+                size_t arg_count = 0;
+                for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
+                    arg_count++;
+                }
+                if (ext->param_count == 0 || arg_count + 1 != ext->param_count) {
+                    error_exit(ERROR_SEM_ARG, call->line, call->name,
+                               "Wrong number of arguments in method call.");
+                    return DATA_UNIT;
+                }
+                if (!is_type_compatible(ext->params[0].type, recv_type, NULL)) {
+                    error_exit(ERROR_SEM_ARG, call->line, call->name,
+                               "Incompatible receiver type.");
+                    return DATA_UNIT;
+                }
+                size_t idx = 1;
+                for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next, idx++) {
+                    DATA_TYPE arg_type = analyze_expression(arg, context);
+                    if (!is_type_compatible(ext->params[idx].type, arg_type, NULL)) {
+                        error_exit(ERROR_SEM_ARG, arg->line, call->name,
+                                   "Incompatible argument type.");
+                        return DATA_UNIT;
+                    }
+                }
+                result = ext->data_type;
+            }
+        }
         call->data_type = result;
+        call->elem_type = result_elem;
         return result;
     }
 
+    symbol_info_t *var = findInScope(context, call->name);
+    if (var != NULL && var->kind == SYM_VAR) {
+        if (var->data_type != DATA_LIST) {
+            error_exit(ERROR_SYN, call->line, call->name, "Variable is not callable.");
+            return DATA_UNIT;
+        }
+        size_t index_args = 0;
+        for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
+            index_args++;
+        }
+        if (index_args != 1) {
+            error_exit(ERROR_SEM_ARG, call->line, call->name, "List index takes one argument.");
+            return DATA_UNIT;
+        }
+        DATA_TYPE index_type = analyze_expression(call->third, context);
+        if (index_type != DATA_INT && index_type != DATA_NONE) {
+            error_exit(ERROR_SEM_ARG, call->line, call->name, "List index must be Int.");
+            return DATA_UNIT;
+        }
+        call->is_index = true;
+        call->data_type = var->elem_type;
+        return var->elem_type;
+    }
+
     symbol_info_t *fn = (symbol_info_t *)symtableSearch(&context->global_symtable, call->name);
-    if (fn == NULL || fn->kind != SYM_FUNC) {
+    if (fn == NULL || fn->kind != SYM_FUNC || fn->is_extension) {
         error_exit(ERROR_SEM_UNDEF, call->line, call->name, "Call to undefined function.");
         return DATA_UNIT;
     }
@@ -549,17 +701,52 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
         context->current_func->is_recursive = true;
     }
 
-    // Argumenty jsou v ast.c uložené v call->third zřetězené přes next
+    size_t call_groups = 0;
     size_t arg_count = 0;
-    for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
-        arg_count++;
+    if (call->arg_groups != NULL) {
+        for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next) {
+            call_groups++;
+            arg_count += (size_t)g->param_cnt;
+        }
+    } else if (call->has_parens) {
+        call_groups = 1;
+        for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
+            arg_count++;
+        }
     }
 
     if (strcmp(fn->name, "List") == 0) {
-        for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
-            analyze_expression(arg, context);
+        DATA_TYPE elem = DATA_NONE;
+        if (call->arg_groups != NULL) {
+            for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next) {
+                for (AST_NODE *arg = g->left; arg != NULL; arg = arg->next) {
+                    DATA_TYPE t = analyze_expression(arg, context);
+                    if (elem == DATA_NONE) {
+                        elem = t;
+                    } else if (t != DATA_NONE && t != elem) {
+                        error_exit(ERROR_SEM_TYPE, arg->line, call->name, "List elements must have the same type.");
+                        return DATA_UNIT;
+                    }
+                }
+            }
+        } else {
+            for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next) {
+                DATA_TYPE t = analyze_expression(arg, context);
+                if (elem == DATA_NONE) {
+                    elem = t;
+                } else if (t != DATA_NONE && t != elem) {
+                    error_exit(ERROR_SEM_TYPE, arg->line, call->name, "List elements must have the same type.");
+                    return DATA_UNIT;
+                }
+            }
         }
+        call->elem_type = elem;
         return DATA_LIST;
+    }
+
+    if (call_groups != fn->group_count) {
+        error_exit(ERROR_SEM_ARG, call->line, call->name, "Wrong number of argument groups in function call.");
+        return DATA_UNIT;
     }
 
     if (arg_count != fn->param_count) {
@@ -567,15 +754,33 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
         return DATA_UNIT;
     }
 
+    if (call->arg_groups != NULL && fn->group_counts != NULL) {
+        size_t gi = 0;
+        for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next, gi++) {
+            if ((size_t)g->param_cnt != fn->group_counts[gi]) {
+                error_exit(ERROR_SEM_ARG, call->line, call->name, "Wrong number of arguments in one group.");
+                return DATA_UNIT;
+            }
+        }
+    }
+
     bool is_any_builtin = (fn->is_builtin && (strcmp(fn->name, "print") == 0 || strcmp(fn->name, "toStr") == 0));
 
     size_t idx = 0;
-    for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next, idx++) {
-        DATA_TYPE arg_type = analyze_expression(arg, context);
-
-        if (!is_any_builtin) {
-            bool needs_conv = false;
-            if (!is_type_compatible(fn->params[idx].type, arg_type, &needs_conv)) {
+    if (call->arg_groups != NULL) {
+        for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next) {
+            for (AST_NODE *arg = g->left; arg != NULL; arg = arg->next, idx++) {
+                DATA_TYPE arg_type = analyze_expression(arg, context);
+                if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, NULL)) {
+                    error_exit(ERROR_SEM_ARG, arg->line, call->name, "Incompatible argument type.");
+                    return DATA_UNIT;
+                }
+            }
+        }
+    } else {
+        for (AST_NODE *arg = call->third; arg != NULL; arg = arg->next, idx++) {
+            DATA_TYPE arg_type = analyze_expression(arg, context);
+            if (!is_any_builtin && !is_type_compatible(fn->params[idx].type, arg_type, NULL)) {
                 error_exit(ERROR_SEM_ARG, arg->line, call->name, "Incompatible argument type.");
                 return DATA_UNIT;
             }
@@ -583,10 +788,44 @@ static DATA_TYPE analyze_function_call(AST_NODE *call, semantic_context_t *conte
     }
 
     call->data_type = fn->data_type;
+    call->elem_type = fn->elem_type;
     return fn->data_type;
 }
 
 /* Rekurzivně vyhodnotí datový typ výrazu a označí implicitní konverzi Int -> Double (chyba 6) */
+static DATA_TYPE analyze_pattern(AST_NODE *pat, semantic_context_t *context, bool *has_wildcard) {
+    if (pat == NULL) {
+        return DATA_NONE;
+    }
+    if (pat->type == NODE_WILDCARD) {
+        *has_wildcard = true;
+        return DATA_NONE;
+    }
+    if (pat->type == NODE_LITERAL) {
+        return pat->data_type;
+    }
+    if (pat->type == NODE_IDENT) {
+        symbol_info_t *sym = create_var_symbol(pat->name, pat->data_type, true, pat->id);
+        symtableInsert(&context->current_scope->symtable, pat->name, sym);
+        return pat->data_type;
+    }
+    if (pat->type == NODE_CALL) {
+        symbol_info_t *ctor = (symbol_info_t *)symtableSearch(&context->global_symtable, pat->name);
+        if (ctor == NULL) {
+            error_exit(ERROR_SEM_UNDEF, pat->line, pat->name, "Undefined constructor in pattern.");
+            return DATA_NONE;
+        }
+        for (AST_NODE *arg = pat->third; arg != NULL; arg = arg->next) {
+            if (arg->type == NODE_IDENT) {
+                symbol_info_t *sym = create_var_symbol(arg->name, arg->data_type, true, arg->id);
+                symtableInsert(&context->current_scope->symtable, arg->name, sym);
+            }
+        }
+        return DATA_NONE;
+    }
+    return DATA_NONE;
+}
+
 static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context) {
     if (expr == NULL) {
         return DATA_UNIT;
@@ -598,6 +837,39 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
 
         case NODE_CALL:
             return analyze_function_call(expr, context);
+
+        case NODE_MATCH: {
+            analyze_expression(expr->left, context);
+            bool has_wildcard = false;
+            bool first = true;
+            DATA_TYPE result = DATA_NONE;
+            for (AST_NODE *branch = expr->right; branch != NULL; branch = branch->next) {
+                newScope(context);
+                analyze_pattern(branch->left, context, &has_wildcard);
+                if (branch->right != NULL) {
+                    DATA_TYPE guard_t = analyze_expression(branch->right, context);
+                    if (guard_t != DATA_BOOL && guard_t != DATA_NONE) {
+                        error_exit(ERROR_SEM_TYPE, branch->line, "match", "Guard must be Boolean.");
+                        return DATA_UNIT;
+                    }
+                }
+                bool branch_ret = false;
+                DATA_TYPE branch_t = analyze_block(branch->third, context, false, &branch_ret);
+                if (first) {
+                    result = branch_t;
+                    first = false;
+                } else if (result != branch_t) {
+                    result = DATA_NONE;
+                }
+                freeScope(context);
+            }
+            if (!has_wildcard) {
+                error_exit(ERROR_SEM_OTHER, expr->line, "match", "Nonexhaustive match.");
+                return DATA_UNIT;
+            }
+            expr->data_type = result;
+            return result;
+        }
 
         case NODE_IF: {
             DATA_TYPE cond_t = analyze_expression(expr->left, context);
@@ -624,8 +896,9 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
             if (expr->third != NULL) {
                 analyze_expression(expr->third, context);
             }
-            expr->data_type = DATA_NONE;
-            return DATA_NONE;
+            expr->data_type = DATA_LIST;
+            expr->elem_type = DATA_INT;
+            return DATA_LIST;
         }
 
         case NODE_INTERP:
@@ -653,6 +926,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
                 return DATA_UNIT;
             }
             expr->data_type = var->data_type;
+            expr->elem_type = var->elem_type;
             expr->id = var->id;
             return var->data_type;
         }
@@ -702,7 +976,16 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
 
                 case OP_ADD:
                     if (left_t == DATA_LIST && right_t == DATA_LIST) {
+                        DATA_TYPE left_elem = expr->left->elem_type;
+                        DATA_TYPE right_elem = expr->right->elem_type;
+                        if (left_elem != DATA_NONE && right_elem != DATA_NONE &&
+                            left_elem != right_elem) {
+                            error_exit(ERROR_SEM_TYPE, expr->line, "concat",
+                                       "List element type mismatch.");
+                            return DATA_UNIT;
+                        }
                         expr->data_type = DATA_LIST;
+                        expr->elem_type = left_elem != DATA_NONE ? left_elem : right_elem;
                         return DATA_LIST;
                     }
                     if (left_t == DATA_STRING && right_t == DATA_STRING) {
@@ -725,16 +1008,22 @@ static DATA_TYPE analyze_expression(AST_NODE *expr, semantic_context_t *context)
                 case OP_TO:
                 case OP_UNTIL:
                 case OP_BY:
-                    if (left_t != DATA_INT && left_t != DATA_LIST) {
-                        error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range requires Int or List.");
+                    if (right_t != DATA_INT && right_t != DATA_NONE) {
+                        error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range bound must be Int.");
                         return DATA_UNIT;
                     }
-                    if (right_t != DATA_INT && right_t != DATA_LIST) {
-                        error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range requires Int or List.");
+                    if (expr->op_type == OP_BY) {
+                        if (left_t != DATA_LIST && left_t != DATA_NONE) {
+                            error_exit(ERROR_SEM_TYPE, expr->line, "range", "Step requires a range.");
+                            return DATA_UNIT;
+                        }
+                    } else if (left_t != DATA_INT && left_t != DATA_NONE) {
+                        error_exit(ERROR_SEM_TYPE, expr->line, "range", "Range start must be Int.");
                         return DATA_UNIT;
                     }
-                    expr->data_type = DATA_NONE;
-                    return DATA_NONE;
+                    expr->data_type = DATA_LIST;
+                    expr->elem_type = DATA_INT;
+                    return DATA_LIST;
 
                 case OP_LT:
                 case OP_LE:
@@ -804,12 +1093,23 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context, 
             return analyze_expression(stmt->left, context);
 
         case NODE_FOR: {
+            DATA_TYPE source_type = DATA_NONE;
+            DATA_TYPE source_elem = DATA_NONE;
             if (stmt->left != NULL) {
-                analyze_expression(stmt->left, context);
+                source_type = analyze_expression(stmt->left, context);
+                source_elem = stmt->left->elem_type;
+            }
+            DATA_TYPE loop_type = DATA_NONE;
+            if (source_type == DATA_LIST) {
+                loop_type = source_elem;
+            } else if (source_type != DATA_NONE) {
+                error_exit(ERROR_SEM_TYPE, stmt->line, stmt->name,
+                           "For source must be a range or a list.");
+                return DATA_UNIT;
             }
             newScope(context);
             if (stmt->name != NULL) {
-                symbol_info_t *var_sym = create_var_symbol(stmt->name, DATA_INT, false, stmt->id);
+                symbol_info_t *var_sym = create_var_symbol(stmt->name, loop_type, false, stmt->id);
                 symtableInsert(&context->current_scope->symtable, stmt->name, var_sym);
             }
             for (AST_NODE *guard = stmt->third; guard != NULL; guard = guard->next) {
@@ -892,6 +1192,7 @@ void semantic_analyze(AST_NODE *root) {
                     free(info->params[p].name);
                 }
                 free(info->params);
+                free(info->group_counts);
                 free_symbol(info);
             }
         }
