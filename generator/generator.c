@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "ast.h"
+#include "error.h"
 #include "gen_internal.h"
 
 /*==========================================================
@@ -22,14 +23,27 @@
  */
 
 
-//valmem
+char *emit_data_type (AST_NODE *node) {
+  switch (node->data_type) {
+    case DATA_INT:
+      return "Int";
+    case DATA_DOUBLE:
+      return "Double";
+    case DATA_STRING:
+      return  "String";
+    case DATA_BOOL:
+      return "Bool";
+  }
+}
+
+
 void lower_members(AST_NODE *root) {
   for (AST_NODE *fn = root; fn; fn = fn->next) {
     if (fn->left)lower_members(fn->left);
     if (fn->right)lower_members(fn->right);
     if (fn->third)lower_members(fn->third);
 
-
+    //valmem
     if (fn->type == NODE_CALL && fn->is_method == true && fn->has_parens ==false && fn->left) {
       if (strcmp(fn->name, "toString") == 0) {
         free(fn->name);
@@ -81,10 +95,53 @@ void lower_members(AST_NODE *root) {
         }
       }
       fn->third = head;
+    }
+
+    //EXTKW
+    if (fn->type == NODE_FUNC_DEF && fn->is_extension) {
+      char *type = emit_data_type(fn->third);
+
+      size_t len = strlen("ext$") + strlen(type) + strlen("$") + strlen(fn->name) + 1;
+      char *new_type = malloc(len);
+
+      if (new_type == NULL) {
+        free(type);
+        error_exit(ERROR_INTERNAL,fn->line,0);
+      }
+
+      snprintf(new_type, len, "ext$%s$%s", type, fn->name);
+
+      free(fn->name);
+      ast_name(fn, new_type);
+      fn->is_extension=false;
+    }
+
+    if (fn->type == NODE_CALL && fn->is_method && fn->left ){
+      char *type = emit_data_type(fn->left);
+
+      size_t len = strlen("ext$") + strlen(type) + strlen("$") + strlen(fn->name) + 1;
+      char *new_type = malloc(len);
+
+      if (new_type == NULL) {
+        free(type);
+        error_exit(ERROR_INTERNAL,fn->line,0);
+      }
+
+      snprintf(new_type, len, "ext$%s$%s", type, fn->name);
+
+      free(fn->name);
+      ast_name(fn, new_type);
 
 
+      AST_NODE *reciever = fn->left;
+      reciever->next = fn->third;
+      fn->third = reciever;
+      fn->left = NULL;
+      fn->is_method = false;
+      fn->has_parens = true;
     }
   }
+
 }
 
 
