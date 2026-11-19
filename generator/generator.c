@@ -103,9 +103,6 @@ void emit_defvars(Gen *gen, AST_NODE *node) {
   }
 }
 
-
-
-
 /*
  *special characters
  */
@@ -150,21 +147,9 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   printf("CREATEFRAME\n");
   printf("PUSHFRAME\n");
 
-
-  /*        Program
- *          /  |  \
- *         /   |   \
- *      func
- */
-
-
   //print all variables
   emit_defvars(gen, fn);
 
-  //parametry - muze jich byt nekonecno? rekurzivni funkce vyrvarejici LF@tmp
-  //=============================
-
-  //mezi promenne cz
   printf("DEFVAR LF@tmp1\n");
   printf("DEFVAR LF@tmp2\n");
   printf("DEFVAR LF@tmp3\n");
@@ -173,8 +158,7 @@ void gen_function(Gen *gen, AST_NODE *fn) {
 
 
   //processing block of code
-  //TODO zkontrolovat jestli tady bude moct byt left - je to uz druhe left (1. je v program init)
-  //TODO znamenalo by to program -> body -> function ale to prece nenamem
+
   for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
     if (node->next==NULL && fn->data_type != DATA_UNIT && node->type == NODE_EXPR_STMT) {
       gen_expr(gen, node->left);

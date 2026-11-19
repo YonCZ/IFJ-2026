@@ -10,14 +10,14 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <scanner/error.h>
 
-static char *ast_strdup(const char *ptr) {
+static char *ast_strdup(const char *ptr, AST_NODE *node) {
   if (!ptr) return NULL;
   size_t len = strlen(ptr);
   char *s = malloc(len + 1);
   if (s == NULL) {
-    exit(99);
+    error_exit(ERROR_INTERNAL,node->line, "error allocating memory");
   }
   memcpy(s, ptr, len);
   s[len] = '\0';
@@ -40,7 +40,7 @@ AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE t
 }
 
 void ast_name(AST_NODE *node, char *name) {
-  node->name = ast_strdup(name);
+  node->name = ast_strdup(name,node);
 }
 
 
@@ -60,7 +60,7 @@ AST_NODE * ast_double_literal_create(double value,AST_NODE *next) {
 }
 AST_NODE * ast_string_literal_create(char *value,AST_NODE *next) {
   AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
-  node->sval = ast_strdup(value);
+  node->sval = ast_strdup(value,node);
   node->data_type = DATA_STRING;
   return node;
 }

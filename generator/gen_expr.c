@@ -15,6 +15,7 @@
 #include "ast.h"
 #include "gen_internal.h"
 #include "generator.h"
+#include "../scanner/error.h"
 //===========================
 // puts one value on stack
 //===========================
@@ -39,8 +40,7 @@ void literal(Gen *gen, AST_NODE *node, char* func_name) {
       printf("string@()");
       break;
     default:
-      error(ErrorInternal);
-      exit(99);
+      error_exit(ERROR_INTERNAL,node->line, "Literal write" );
   }
   printf("\n");
 }
