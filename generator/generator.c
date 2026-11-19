@@ -24,7 +24,6 @@
 
 //valmem
 void lower_members(AST_NODE *root) {
-
   for (AST_NODE *fn = root; fn; fn = fn->next) {
     if (fn->left)lower_members(fn->left);
     if (fn->right)lower_members(fn->right);
@@ -64,6 +63,27 @@ void lower_members(AST_NODE *root) {
       }
     }
 
+    //Paramlist
+    if ((fn->type == NODE_FUNC_DEF || fn->type ==NODE_CALL) && fn->third && fn->third->type == NODE_PARAM_LIST) {
+      AST_NODE *head = NULL;
+      AST_NODE *tail = NULL;
+      for (AST_NODE *list = fn->third; list; list = list->next) {
+        if (list->left) {
+          if (head == NULL) {
+            head = list->left;
+          }
+          else {
+            tail->next= list->left;
+          }
+
+          tail = list->left;
+          while (tail && tail->next) {tail = tail->next;}
+        }
+      }
+      fn->third = head;
+
+
+    }
   }
 }
 
