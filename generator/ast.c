@@ -206,13 +206,13 @@ AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, 
 
 AST_NODE *ast_create_params_list_of_list(AST_NODE *next_param_list, int list_cnt) {
   AST_NODE *node = ast_create(NULL, NULL, next_param_list, NODE_LIST_OF_LIST);
-  node->list_cnt = list_cnt;
+  node->list_no = list_cnt;
   return node;
 }
 
 AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt) {
   AST_NODE *node = ast_create(params,NULL, next, NODE_PARAM_LIST);
-  node->list_param_cnt = param_cnt;
+  node->list_more_lists = param_cnt;
   return node;
 }
 

@@ -2,7 +2,9 @@
  * Projekt: IFJ26 – překladač jazyka IFJ26 do IFJcode26
  * Soubor:  test_generator.c – test generátoru kódu (fáze 0: kostra, 1: konstanty a print,
  *                            2: výrazy, 3: proměnné, 4: if a while, 5: funkce,
- *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN, 8: rozšíření CONTROL – cyklus for a if jako výraz)
+ *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN, 8: rozšíření CONTROL – cyklus for a if jako výraz,
+ *                            9: rozšíření FUNEXP – volání funkcí ve výrazech,
+ *                            10: rozšíření VALMEM – členy hodnot)
  *
  * ---------------------------------------------------------------------------
  * Tento soubor vygenerovala AI: Claude Sonnet 5.5 (Anthropic, claude-sonnet-5-5), 2026-11-17.
@@ -19,6 +21,8 @@
  * Prompt 9: "udelej test na for loop" (fáze 8: for s to / until / by, stráže, vnořené cykly)
  * Prompt 10: "uprav test pro cele rozsireni control odendej 4 testy ktere ted nevychazi" (fáze 8 je celé
  *            CONTROL: for + if jako výraz; testy se záporným krokem odebrány)
+ * Prompt 11: "funexp? ..." (fáze 9: rozšíření FUNEXP, volání funkcí uvnitř výrazů)
+ * Prompt 12: "co mam delat pro rozsireni valmem" (fáze 10: rozšíření VALMEM, členy .toString .toInt .length .floor)
  * Zadal a zrevidoval: Pavel Novák (xnovakp01)
  * ---------------------------------------------------------------------------
  *
@@ -36,8 +40,8 @@
  *         -o test_generator && ./test_generator
  *
  * POUŽITÍ
- *     ./test_generator              všechny případy (fáze 0 až 8)
- *     ./test_generator f8           jen fáze 8 (f0 až f7 = jen ta fáze)
+ *     ./test_generator              všechny případy (fáze 0 až 10)
+ *     ./test_generator f8           jen fáze 8 (f0 až f10 = jen ta fáze)
  *     ./test_generator f1_string    jen případ s tímto jménem
  *     ./test_generator -v           vypíše vygenerovaný kód i u případů, které prošly
  *     INTERP=cesta/k/ic26int ./test_generator
@@ -2089,6 +2093,278 @@ static AST_NODE *build_f8_ife_lazy_run(void) { /* if true then side() else 2: si
 #undef B
 #undef U
 
+
+/* ------------------------------------------------------------------------- */
+/* fáze 9: rozšíření FUNEXP – volání funkcí (uživatelských i vestavěných) uvnitř výrazů.
+ * Volání je uzel NODE_CALL s data_type = typ výsledku; stojí tam, kde by byl term: jako operand,
+ * argument jiného volání, podmínka, mez cyklu for, hodnota inicializace. Argumenty se vyhodnocují
+ * zleva doprava. Čísla proměnných: parametry funkcí 1 a 2, proměnné v main od 10. */
+#define I9 DATA_INT
+#define S9 DATA_STRING
+#define D9 DATA_DOUBLE
+#define B9 DATA_BOOL
+#define UI9(name, id) use((name), (id), I9)
+#define LI9(v) lit_i(v)
+#define TW9(e) fcall("twice", (e), I9)
+#define SH9(e) fcall("show9", (e), I9)
+#define GR9() fcall("greet", NULL, S9)
+#define P9(e, nx) print_stmt((e), (nx))
+#define PS9(str, nx) print_stmt(lit_s(str), (nx))
+#define PLUS9(l, r) bin(OP_ADD, (l), (r), I9)
+#define SUB9(l, r) bin(OP_SUB, (l), (r), I9)
+#define MUL9(l, r) bin(OP_MUL, (l), (r), I9)
+#define LT9(l, r) bin(OP_LT, (l), (r), B9)
+#define GT9(l, r) bin(OP_GT, (l), (r), B9)
+#define EQ9(l, r) bin(OP_EQ, (l), (r), B9)
+
+/* def twice(n: Int): Int = n * 2 */
+static AST_NODE *twice9_fn(AST_NODE *next) {
+  return fdef("twice", I9, par("n", 1, I9, NULL), flast(MUL9(UI9("n", 1), LI9(2)), NULL), next);
+}
+/* def add(a: Int, b: Int): Int = a + b */
+static AST_NODE *add9_fn(AST_NODE *next) {
+  return fdef("add", I9, par("a", 1, I9, par("b", 2, I9, NULL)),
+              flast(PLUS9(UI9("a", 1), UI9("b", 2)), NULL), next);
+}
+/* def show9(n: Int): Int = { print(n); n }  (vedlejší účinek: vypíše argument) */
+static AST_NODE *show9_fn(AST_NODE *next) {
+  return fdef("show9", I9, par("n", 1, I9, NULL),
+              P9(UI9("n", 1), flast(UI9("n", 1), NULL)), next);
+}
+/* def greet(): String = "hello" */
+static AST_NODE *greet9_fn(AST_NODE *next) {
+  return fdef("greet", S9, NULL, flast(lit_s("hello"), NULL), next);
+}
+/* def isPos(n: Int): Boolean = n > 0 */
+static AST_NODE *ispos9_fn(AST_NODE *next) {
+  return fdef("isPos", B9, par("n", 1, I9, NULL), flast(GT9(UI9("n", 1), LI9(0)), NULL), next);
+}
+/* def half(x: Double): Double = x / 2.0 */
+static AST_NODE *half9_fn(AST_NODE *next) {
+  return fdef("half", D9, par("x", 1, D9, NULL),
+              flast(bin(OP_DIV, use("x", 1, D9), lit_d(2.0), D9), NULL), next);
+}
+static AST_NODE *prog9(AST_NODE *body, AST_NODE *funcs) { return make_program(main_fn(body, funcs)); }
+
+static AST_NODE *build_f9_operand_l(void) { return prog9(P9(PLUS9(TW9(LI9(3)), LI9(1)), NULL), twice9_fn(NULL)); }
+static AST_NODE *build_f9_operand_r(void) { return prog9(P9(PLUS9(LI9(1), TW9(LI9(3))), NULL), twice9_fn(NULL)); }
+static AST_NODE *build_f9_mul(void) {
+  return prog9(P9(PLUS9(MUL9(LI9(2), TW9(LI9(3))), LI9(1)), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f9_two_calls(void) {
+  return prog9(P9(PLUS9(TW9(LI9(2)), TW9(LI9(3))), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f9_nested(void) { return prog9(P9(TW9(TW9(LI9(3))), NULL), twice9_fn(NULL)); }
+static AST_NODE *build_f9_print_call(void) { return prog9(P9(TW9(LI9(4)), NULL), twice9_fn(NULL)); }
+static AST_NODE *build_f9_arg_expr(void) { /* add(twice(1) + 1, twice(2) * 3) = add(3, 12) */
+  return prog9(P9(fcall("add", a2(PLUS9(TW9(LI9(1)), LI9(1)), MUL9(TW9(LI9(2)), LI9(3))), I9), NULL),
+               twice9_fn(add9_fn(NULL)));
+}
+static AST_NODE *build_f9_val_init(void) { /* val r = 2 * twice(5) + 1 */
+  return prog9(vdef("r", 10, true, I9, PLUS9(MUL9(LI9(2), TW9(LI9(5))), LI9(1)), P9(UI9("r", 10), NULL)),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_assign(void) { /* var x = 1; x = twice(4) + x */
+  return prog9(vdef("x", 10, false, I9, LI9(1),
+                    assign(UI9("x", 10), PLUS9(TW9(LI9(4)), UI9("x", 10)), P9(UI9("x", 10), NULL))),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_cond_if(void) { /* if twice(2) > 3 then print("Y") else print("N") */
+  return prog9(if_stmt(GT9(TW9(LI9(2)), LI9(3)), PS9("Y", NULL), PS9("N", NULL), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f9_cond_while(void) { /* while twice(i) < 6 do i = i + 1 */
+  return prog9(vdef("i", 10, false, I9, LI9(0),
+                    while_stmt(LT9(TW9(UI9("i", 10)), LI9(6)),
+                               assign(UI9("i", 10), PLUS9(UI9("i", 10), LI9(1)), NULL),
+                               P9(UI9("i", 10), NULL))),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_cmp_calls(void) { /* twice(2) == twice(1) + 2 */
+  return prog9(if_stmt(EQ9(TW9(LI9(2)), PLUS9(TW9(LI9(1)), LI9(2))), PS9("Y", NULL), PS9("N", NULL), NULL),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_unary(void) { return prog9(P9(neg(TW9(LI9(3)), I9), NULL), twice9_fn(NULL)); }
+static AST_NODE *build_f9_div(void) { /* twice(7) / twice(1) = 14 / 2 */
+  return prog9(P9(bin(OP_DIV, TW9(LI9(7)), TW9(LI9(1)), I9), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f9_bool(void) { /* isPos(3) && !isPos(-1) */
+  return prog9(P9(bin(OP_AND, fcall("isPos", LI9(3), B9), not_op(fcall("isPos", neg(LI9(1), I9), B9)), B9), NULL),
+               ispos9_fn(NULL));
+}
+static AST_NODE *build_f9_double_mix(void) { /* toStr(1 + half(3.0)) = "2.50" (Int + volání typu Double) */
+  return prog9(P9(fcall("toStr", bin(OP_ADD, LI9(1), fcall("half", lit_d(3.0), D9), D9), S9), NULL),
+               half9_fn(NULL));
+}
+static AST_NODE *build_f9_builtin_user(void) { /* toStr(twice(21)) */
+  return prog9(P9(fcall("toStr", TW9(LI9(21)), S9), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f9_strlen_greet(void) { /* strLength(greet()) + twice(1) = 5 + 2 */
+  return prog9(P9(PLUS9(fcall("strLength", GR9(), I9), TW9(LI9(1))), NULL), twice9_fn(greet9_fn(NULL)));
+}
+static AST_NODE *build_f9_substr(void) { /* subStr(greet(), twice(0), twice(1) + 1) = subStr("hello", 0, 3) */
+  return prog9(P9(fcall("subStr", a3(GR9(), TW9(LI9(0)), PLUS9(TW9(LI9(1)), LI9(1))), S9), NULL),
+               twice9_fn(greet9_fn(NULL)));
+}
+static AST_NODE *build_f9_concat(void) { /* greet() + " " + greet() */
+  return prog9(P9(bin(OP_ADD, bin(OP_ADD, GR9(), lit_s(" "), S9), GR9(), S9), NULL), greet9_fn(NULL));
+}
+static AST_NODE *build_f9_order(void) { /* show(1) + show(2) * show(3): vypíše 123, výsledek 7 */
+  return prog9(P9(PLUS9(SH9(LI9(1)), MUL9(SH9(LI9(2)), SH9(LI9(3)))), NULL), show9_fn(NULL));
+}
+static AST_NODE *build_f9_order_args(void) { /* add(show(1), show(2)): argumenty zleva doprava, pak 3 */
+  return prog9(P9(fcall("add", a2(SH9(LI9(1)), SH9(LI9(2))), I9), NULL), show9_fn(add9_fn(NULL)));
+}
+static AST_NODE *build_f9_ret(void) { /* def wrap(n): Int = return twice(n) + 1 */
+  AST_NODE *f = fdef("wrap", I9, par("n", 1, I9, NULL), fret(PLUS9(TW9(UI9("n", 1)), LI9(1)), NULL), NULL);
+  return prog9(P9(fcall("wrap", LI9(4), I9), NULL), twice9_fn(f));
+}
+static AST_NODE *build_f9_tail(void) { /* def g(n): Int = twice(n) + 1 (výraz jako poslední příkaz) */
+  AST_NODE *g = fdef("g", I9, par("n", 1, I9, NULL), flast(PLUS9(TW9(UI9("n", 1)), LI9(1)), NULL), NULL);
+  return prog9(P9(fcall("g", LI9(5), I9), NULL), twice9_fn(g));
+}
+static AST_NODE *build_f9_fact(void) { /* fact(n) = n * fact(n - 1): rekurze přímo ve výrazu */
+  AST_NODE *body = if_stmt(LT9(UI9("n", 1), LI9(2)), fret(LI9(1), NULL), NULL,
+                           fret(MUL9(UI9("n", 1), fcall("fact", SUB9(UI9("n", 1), LI9(1)), I9)), NULL));
+  return prog9(P9(fcall("fact", LI9(5), I9), NULL), fdef("fact", I9, par("n", 1, I9, NULL), body, NULL));
+}
+static AST_NODE *build_f9_fib(void) { /* fib(n - 1) + fib(n - 2) přímo ve výrazu */
+  AST_NODE *body = if_stmt(LT9(UI9("n", 1), LI9(2)), fret(UI9("n", 1), NULL), NULL,
+                           fret(PLUS9(fcall("fib", SUB9(UI9("n", 1), LI9(1)), I9),
+                                      fcall("fib", SUB9(UI9("n", 1), LI9(2)), I9)), NULL));
+  return prog9(P9(fcall("fib", LI9(10), I9), NULL), fdef("fib", I9, par("n", 1, I9, NULL), body, NULL));
+}
+static AST_NODE *build_f9_for_bound(void) { /* for i <- 1 to twice(2) */
+  return prog9(for_stmt("i", 1, LI9(1), TW9(LI9(2)), NULL, true, NULL, P9(UI9("i", 1), NULL), NULL),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_ife(void) { /* val r = if twice(1) > 1 then twice(5) else 0 */
+  return prog9(vdef("r", 10, true, I9,
+                    ife(GT9(TW9(LI9(1)), LI9(1)), flast(TW9(LI9(5)), NULL), flast(LI9(0), NULL), I9),
+                    P9(UI9("r", 10), NULL)),
+               twice9_fn(NULL));
+}
+static AST_NODE *build_f9_loop_sum(void) { /* s = s + twice(i) ve smyčce: zásobník se nesmí plnit */
+  return prog9(vdef("s", 10, false, I9, LI9(0),
+                    vdef("i", 11, false, I9, LI9(0),
+                         while_stmt(LT9(UI9("i", 11), LI9(5)),
+                                    assign(UI9("s", 10), PLUS9(UI9("s", 10), TW9(UI9("i", 11))),
+                                           assign(UI9("i", 11), PLUS9(UI9("i", 11), LI9(1)), NULL)),
+                                    P9(UI9("s", 10), NULL)))),
+               twice9_fn(NULL));
+}
+#undef I9
+#undef S9
+#undef D9
+#undef B9
+
+
+/* ------------------------------------------------------------------------- */
+/* fáze 10: rozšíření VALMEM – členy hodnot x.toString, x.toInt, x.length, x.floor.
+ * Člen je uzel NODE_CALL z ast_method_call_create: příjemce v left, is_method = true,
+ * has_parens = false, data_type = typ výsledku (toString: String, toInt: Int, length: Int,
+ * floor: Double). Řetězení (x.floor.toInt) = příjemce je sám takový uzel. Proměnné v main od 10. */
+#define I10 DATA_INT
+#define S10 DATA_STRING
+#define D10 DATA_DOUBLE
+#define B10 DATA_BOOL
+#define UI10(name, id) use((name), (id), I10)
+#define UD10(name, id) use((name), (id), D10)
+#define US10(name, id) use((name), (id), S10)
+#define P10(e, nx) print_stmt((e), (nx))
+#define PLUS10(l, r) bin(OP_ADD, (l), (r), I10)
+
+static AST_NODE *member10(const char *name, AST_NODE *recv, DATA_TYPE t) {
+  AST_NODE *n = ast_method_call_create(NULL, (char *)name, true, false, recv, NULL);
+  n->data_type = t;
+  return n;
+}
+#define TOSTRING10(r) member10("toString", (r), S10)
+#define TOINT10(r) member10("toInt", (r), I10)
+#define LENGTH10(r) member10("length", (r), I10)
+#define FLOOR10(r) member10("floor", (r), D10)
+static AST_NODE *prog10(AST_NODE *body, AST_NODE *funcs) { return make_program(main_fn(body, funcs)); }
+
+static AST_NODE *build_f10_tostring_int(void) { return prog10(P10(TOSTRING10(lit_i(42)), NULL), NULL); }
+static AST_NODE *build_f10_tostring_neg(void) { return prog10(P10(TOSTRING10(neg(lit_i(7), I10)), NULL), NULL); }
+static AST_NODE *build_f10_tostring_double(void) { return prog10(P10(TOSTRING10(lit_d(2.5)), NULL), NULL); }
+static AST_NODE *build_f10_tostring_bool(void) { return prog10(P10(TOSTRING10(lit_b(true)), NULL), NULL); }
+static AST_NODE *build_f10_tostring_string(void) { return prog10(P10(TOSTRING10(lit_s("abc")), NULL), NULL); }
+static AST_NODE *build_f10_tostring_var(void) { /* val a = 5; val b = a.toString; print(b) */
+  return prog10(vdef("a", 10, true, I10, lit_i(5),
+                     vdef("b", 11, true, S10, TOSTRING10(UI10("a", 10)), P10(US10("b", 11), NULL))),
+                NULL);
+}
+static AST_NODE *build_f10_tostring_both(void) { /* (1).toString + (1.5).toString: obě varianty toStr */
+  return prog10(P10(bin(OP_ADD, TOSTRING10(lit_i(1)), TOSTRING10(lit_d(1.5)), S10), NULL), NULL);
+}
+static AST_NODE *build_f10_length(void) { return prog10(P10(LENGTH10(lit_s("hello")), NULL), NULL); }
+static AST_NODE *build_f10_length_empty(void) { return prog10(P10(LENGTH10(lit_s("")), NULL), NULL); }
+static AST_NODE *build_f10_length_var(void) {
+  return prog10(vdef("s", 10, true, S10, lit_s("abcd"), P10(LENGTH10(US10("s", 10)), NULL)), NULL);
+}
+static AST_NODE *build_f10_toint(void) { return prog10(P10(TOINT10(lit_d(3.9)), NULL), NULL); }
+static AST_NODE *build_f10_toint_neg(void) { return prog10(P10(TOINT10(neg(lit_d(3.9), D10)), NULL), NULL); }
+static AST_NODE *build_f10_floor(void) { return prog10(P10(TOSTRING10(FLOOR10(lit_d(2.7))), NULL), NULL); }
+static AST_NODE *build_f10_floor_neg(void) { return prog10(P10(TOSTRING10(FLOOR10(neg(lit_d(2.5), D10))), NULL), NULL); }
+static AST_NODE *build_f10_floor_whole(void) { return prog10(P10(TOSTRING10(FLOOR10(neg(lit_d(2.0), D10))), NULL), NULL); }
+static AST_NODE *build_f10_floor_small(void) { return prog10(P10(TOSTRING10(FLOOR10(neg(lit_d(0.5), D10))), NULL), NULL); }
+static AST_NODE *build_f10_floor_zero(void) { return prog10(P10(TOSTRING10(FLOOR10(lit_d(0.0))), NULL), NULL); }
+static AST_NODE *build_f10_floor_toint(void) { return prog10(P10(TOINT10(FLOOR10(lit_d(2.7))), NULL), NULL); } /* 2 */
+static AST_NODE *build_f10_floor_toint_neg(void) { return prog10(P10(TOINT10(FLOOR10(neg(lit_d(2.5), D10))), NULL), NULL); } /* -3 */
+static AST_NODE *build_f10_chain_length(void) { /* (12345).toString.length */
+  return prog10(P10(LENGTH10(TOSTRING10(lit_i(12345))), NULL), NULL);
+}
+static AST_NODE *build_f10_chain_long(void) { /* (2.7).floor.toString.length = "2.00".length = 4 */
+  return prog10(P10(LENGTH10(TOSTRING10(FLOOR10(lit_d(2.7)))), NULL), NULL);
+}
+static AST_NODE *build_f10_expr(void) { /* "abc".length + 1 */
+  return prog10(P10(PLUS10(LENGTH10(lit_s("abc")), lit_i(1)), NULL), NULL);
+}
+static AST_NODE *build_f10_expr_two(void) { /* "ab".length * "cde".length */
+  return prog10(P10(bin(OP_MUL, LENGTH10(lit_s("ab")), LENGTH10(lit_s("cde")), I10), NULL), NULL);
+}
+static AST_NODE *build_f10_cond(void) { /* ukázka ze zadání: if b.length > 5 then print(b) else print("no") */
+  return prog10(vdef("a", 10, true, I10, lit_i(5),
+                     vdef("b", 11, true, S10, TOSTRING10(UI10("a", 10)),
+                          if_stmt(bin(OP_GT, LENGTH10(US10("b", 11)), lit_i(5), B10),
+                                  P10(US10("b", 11), NULL), print_stmt(lit_s("no"), NULL), NULL))),
+                NULL);
+}
+static AST_NODE *build_f10_recv_expr(void) { /* (1 + 2).toString */
+  return prog10(P10(TOSTRING10(PLUS10(lit_i(1), lit_i(2))), NULL), NULL);
+}
+static AST_NODE *build_f10_recv_call(void) { /* twice(4).toString */
+  return prog10(P10(TOSTRING10(fcall("twice", lit_i(4), I10)), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f10_arg(void) { /* subStr("hello", 0, "ab".length) = "he" */
+  return prog10(P10(fcall("subStr", a3(lit_s("hello"), lit_i(0), LENGTH10(lit_s("ab"))), S10), NULL), NULL);
+}
+static AST_NODE *build_f10_concat(void) { /* "n=" + (5).toString */
+  return prog10(P10(bin(OP_ADD, lit_s("n="), TOSTRING10(lit_i(5)), S10), NULL), NULL);
+}
+static AST_NODE *build_f10_for(void) { /* for i <- 9 to 11: print(i.toString.length) = 1 2 2 */
+  return prog10(for_stmt("i", 1, lit_i(9), lit_i(11), NULL, true, NULL,
+                         P10(LENGTH10(TOSTRING10(UI10("i", 1))), NULL), NULL), NULL);
+}
+static AST_NODE *build_f10_floor_var(void) { /* var x = 7.9; x.floor.toInt */
+  return prog10(vdef("x", 10, false, D10, lit_d(7.9), P10(TOINT10(FLOOR10(UD10("x", 10))), NULL)), NULL);
+}
+static AST_NODE *build_f10_param(void) { /* def half(x: Double): Int = x.toInt ... f(5.5) = 5 */
+  AST_NODE *f = fdef("trunc", I10, par("x", 1, D10, NULL), flast(TOINT10(UD10("x", 1)), NULL), NULL);
+  return prog10(P10(fcall("trunc", lit_d(5.5), I10), NULL), f);
+}
+static AST_NODE *build_f10_floor_two(void) { /* dvě volání floor, definice funkce jen jednou */
+  return prog10(P10(bin(OP_ADD, TOSTRING10(FLOOR10(lit_d(1.5))), TOSTRING10(FLOOR10(neg(lit_d(1.5), D10))), S10), NULL), NULL);
+}
+static AST_NODE *build_f10_user_floor(void) { /* uživatelská funkce floor se nesmí plést s členem .floor */
+  AST_NODE *fl = fdef("floor", I10, par("n", 1, I10, NULL), flast(PLUS10(UI10("n", 1), lit_i(100)), NULL), NULL);
+  return prog10(P10(PLUS10(fcall("floor", lit_i(1), I10), TOINT10(FLOOR10(lit_d(2.5)))), NULL), fl); /* 101 + 2 */
+}
+#undef I10
+#undef S10
+#undef D10
+#undef B10
+
 typedef struct {
   const char *name;
   int phase;
@@ -2673,6 +2949,74 @@ static const Case CASES[] = {
     {"f8_ife_return", 8, "main", {"pick", NULL}, build_f8_ife_return, "return if x > 0 then 1 else 2", "1,2", {NULL}, NULL, 0},
     {"f8_ife_lazy", 8, "main", {"side", NULL}, build_f8_ife_lazy, "vyhodnotí se jen vybraná větev: if false then side() else 2 nevypíše S", "2", {NULL}, NULL, 0},
     {"f8_ife_lazy_run", 8, "main", {"side", NULL}, build_f8_ife_lazy_run, "vybraná větev se vyhodnotí: if true then side() else 2 vypíše S", "S1", {NULL}, NULL, 0},
+
+#define F9(nm, ph, bld, ds, out, ...) {nm, ph, "main", {__VA_ARGS__}, bld, ds, out, {NULL}, NULL, 0}
+    F9("f9_operand_l", 9, build_f9_operand_l, "twice(3) + 1: volání jako levý operand", "7", "twice", NULL),
+    F9("f9_operand_r", 9, build_f9_operand_r, "1 + twice(3): volání jako pravý operand", "7", "twice", NULL),
+    F9("f9_mul", 9, build_f9_mul, "2 * twice(3) + 1: priorita operátorů", "13", "twice", NULL),
+    F9("f9_two_calls", 9, build_f9_two_calls, "twice(2) + twice(3): dvě volání v jednom výrazu", "10", "twice", NULL),
+    F9("f9_nested", 9, build_f9_nested, "twice(twice(3)): volání jako argument volání", "12", "twice", NULL),
+    F9("f9_print_call", 9, build_f9_print_call, "print(twice(4)): volání přímo jako argument print", "8", "twice", NULL),
+    F9("f9_arg_expr", 9, build_f9_arg_expr, "add(twice(1) + 1, twice(2) * 3): argumenty jsou výrazy s voláním", "15", "twice", "add"),
+    F9("f9_val_init", 9, build_f9_val_init, "val r = 2 * twice(5) + 1", "21", "twice", NULL),
+    F9("f9_assign", 9, build_f9_assign, "x = twice(4) + x", "9", "twice", NULL),
+    F9("f9_cond_if", 9, build_f9_cond_if, "podmínka if obsahuje volání: twice(2) > 3", "Y", "twice", NULL),
+    F9("f9_cond_while", 9, build_f9_cond_while, "podmínka while obsahuje volání: twice(i) < 6", "3", "twice", NULL),
+    F9("f9_cmp_calls", 9, build_f9_cmp_calls, "twice(2) == twice(1) + 2: volání na obou stranách porovnání", "Y", "twice", NULL),
+    F9("f9_unary", 9, build_f9_unary, "-twice(3): unární mínus před voláním", "-6", "twice", NULL),
+    F9("f9_div", 9, build_f9_div, "twice(7) / twice(1): celočíselné dělení dvou volání", "7", "twice", NULL),
+    F9("f9_bool", 9, build_f9_bool, "isPos(3) && !isPos(-1): Boolean volání se zkratem", "true", "isPos", NULL),
+    F9("f9_double_mix", 9, build_f9_double_mix, "toStr(1 + half(3.0)): Int plus volání typu Double", "2.50", "half", NULL),
+    F9("f9_builtin_user", 9, build_f9_builtin_user, "toStr(twice(21)): uživatelské volání v argumentu vestavěné funkce", "42", "twice", NULL),
+    F9("f9_strlen_greet", 9, build_f9_strlen_greet, "strLength(greet()) + twice(1)", "7", "twice", "greet"),
+    F9("f9_substr", 9, build_f9_substr, "subStr(greet(), twice(0), twice(1) + 1)", "hel", "twice", "greet"),
+    F9("f9_concat", 9, build_f9_concat, "greet() + \" \" + greet(): spojení řetězců z volání", "hello hello", "greet", NULL),
+    F9("f9_order", 9, build_f9_order, "show(1) + show(2) * show(3): vyhodnocení zleva doprava (vypíše 123, výsledek 7)", "1237", "show9", NULL),
+    F9("f9_order_args", 9, build_f9_order_args, "add(show(1), show(2)): argumenty zleva doprava", "123", "show9", "add"),
+    F9("f9_ret", 9, build_f9_ret, "return twice(n) + 1", "9", "twice", "wrap"),
+    F9("f9_tail", 9, build_f9_tail, "poslední výraz funkce obsahuje volání: twice(n) + 1", "11", "twice", "g"),
+    F9("f9_fact", 9, build_f9_fact, "fact(5) s rekurzí přímo ve výrazu n * fact(n - 1)", "120", "fact", NULL),
+    F9("f9_fib", 9, build_f9_fib, "fib(10) s fib(n - 1) + fib(n - 2) přímo ve výrazu", "55", "fib", NULL),
+    F9("f9_for_bound", 9, build_f9_for_bound, "for i <- 1 to twice(2): volání jako mez cyklu", "1234", "twice", NULL),
+    F9("f9_ife", 9, build_f9_ife, "if twice(1) > 1 then twice(5) else 0: volání v if výrazu", "10", "twice", NULL),
+    F9("f9_loop_sum", 9, build_f9_loop_sum, "s = s + twice(i) v cyklu while: zásobník se nesmí plnit", "20", "twice", NULL),
+#undef F9
+
+#define F10(nm, bld, ds, out, ...) {nm, 10, "main", {__VA_ARGS__}, bld, ds, out, {NULL}, NULL, 0}
+    F10("f10_tostring_int", build_f10_tostring_int, "(42).toString", "42"),
+    F10("f10_tostring_neg", build_f10_tostring_neg, "(-7).toString", "-7"),
+    F10("f10_tostring_double", build_f10_tostring_double, "(2.5).toString = \"2.50\"", "2.50"),
+    F10("f10_tostring_bool", build_f10_tostring_bool, "true.toString", "true"),
+    F10("f10_tostring_string", build_f10_tostring_string, "\"abc\".toString", "abc"),
+    F10("f10_tostring_var", build_f10_tostring_var, "val b = a.toString (ukázka ze zadání)", "5"),
+    F10("f10_tostring_both", build_f10_tostring_both, "(1).toString + (1.5).toString: obě varianty toStr", "11.50"),
+    F10("f10_length", build_f10_length, "\"hello\".length", "5"),
+    F10("f10_length_empty", build_f10_length_empty, "\"\".length", "0"),
+    F10("f10_length_var", build_f10_length_var, "s.length s proměnnou", "4"),
+    F10("f10_toint", build_f10_toint, "(3.9).toInt", "3"),
+    F10("f10_toint_neg", build_f10_toint_neg, "(-3.9).toInt se osekne k nule", "-3"),
+    F10("f10_floor", build_f10_floor, "(2.7).floor.toString", "2.00"),
+    F10("f10_floor_neg", build_f10_floor_neg, "(-2.5).floor.toString = -3.00 (ne -2)", "-3.00"),
+    F10("f10_floor_whole", build_f10_floor_whole, "(-2.0).floor: celé číslo se nemění", "-2.00"),
+    F10("f10_floor_small", build_f10_floor_small, "(-0.5).floor = -1.00", "-1.00"),
+    F10("f10_floor_zero", build_f10_floor_zero, "(0.0).floor", "0.00"),
+    F10("f10_floor_toint", build_f10_floor_toint, "(2.7).floor.toInt: řetězení", "2"),
+    F10("f10_floor_toint_neg", build_f10_floor_toint_neg, "(-2.5).floor.toInt: řetězení se záporným", "-3"),
+    F10("f10_chain_length", build_f10_chain_length, "(12345).toString.length", "5"),
+    F10("f10_chain_long", build_f10_chain_long, "(2.7).floor.toString.length: tři členy za sebou", "4"),
+    F10("f10_expr", build_f10_expr, "\"abc\".length + 1", "4"),
+    F10("f10_expr_two", build_f10_expr_two, "\"ab\".length * \"cde\".length", "6"),
+    F10("f10_cond", build_f10_cond, "if b.length > 5 then print(b) else print(\"no\")", "no"),
+    F10("f10_recv_expr", build_f10_recv_expr, "(1 + 2).toString: příjemce je výraz", "3"),
+    F10("f10_recv_call", build_f10_recv_call, "twice(4).toString: příjemce je volání funkce", "8", "twice"),
+    F10("f10_arg", build_f10_arg, "subStr(\"hello\", 0, \"ab\".length): člen v argumentu volání", "he"),
+    F10("f10_concat", build_f10_concat, "\"n=\" + (5).toString", "n=5"),
+    F10("f10_for", build_f10_for, "for i <- 9 to 11: print(i.toString.length)", "122"),
+    F10("f10_floor_var", build_f10_floor_var, "x.floor.toInt s proměnnou Double", "7"),
+    F10("f10_param", build_f10_param, "x.toInt na parametru typu Double", "5", "trunc"),
+    F10("f10_floor_two", build_f10_floor_two, "dvě použití .floor (definice floor se vypíše jen jednou)", "1.00-2.00"),
+    F10("f10_user_floor", build_f10_user_floor, "uživatelská funkce floor(n) a člen .floor v jednom programu", "103", "floor"),
+#undef F10
 };
 #define N_CASES (sizeof CASES / sizeof CASES[0])
 
@@ -3763,7 +4107,7 @@ static void check_output(const Case *c, const char *text, size_t len) {
   for (int f = 0; f < nf; f++) {
     int cnt = 0;
     for (int i = 0; i < n_labels; i++)
-      if (label_fn[i] && has_name(label_name[i], funcs[f])) cnt++;
+      if (label_fn[i] && strncmp(label_name[i], "$f_", 3) == 0 && has_name(label_name[i], funcs[f])) cnt++; /* jen uživatelské funkce, ne vestavěné $b_ */
     if (cnt == 0) problem("funkce '%s' se nevygenerovala (chybí její LABEL)", funcs[f]);
     if (cnt > 1) problem("funkce '%s' má LABEL víckrát (%dx)", funcs[f], cnt);
   }
@@ -4122,8 +4466,11 @@ static bool run_case(const Case *c, bool verbose, const char *interp) {
 static bool selected(const Case *c, const char *only) {
   if (!only) return true;
   if (strcmp(only, c->name) == 0) return true;
-  if (only[0] == 'f' && only[1] >= '0' && only[1] <= '9' && only[2] == '\0')
-    return c->phase == only[1] - '0';
+  if (only[0] == 'f' && only[1] >= '0' && only[1] <= '9') {
+    char *end = NULL;
+    long ph = strtol(only + 1, &end, 10);
+    if (end && *end == '\0') return c->phase == ph;
+  }
   return false;
 }
 
@@ -4142,11 +4489,13 @@ int main(int argc, char **argv) {
   const char *interp = find_interpreter(interp_buf, sizeof interp_buf, &explicit_env);
 
   int total_ok = 0, total_bad = 0, ran = 0;
-  int phase_ok[9] = {0}, phase_bad[9] = {0};
-  static const char *const PHASE_NAME[9] = {"kostra programu a funkcí", "konstanty a print",
+  int phase_ok[11] = {0}, phase_bad[11] = {0};
+  static const char *const PHASE_NAME[11] = {"kostra programu a funkcí", "konstanty a print",
                                            "výrazy", "proměnné", "if a while", "funkce",
-                                           "vestavěné funkce", "rozšíření BOOLTHEN", "rozšíření CONTROL (cyklus for)"};
-  for (int phase = 0; phase <= 8; phase++) {
+                                           "vestavěné funkce", "rozšíření BOOLTHEN", "rozšíření CONTROL (cyklus for)",
+                                           "rozšíření FUNEXP (volání ve výrazech)",
+                                           "rozšíření VALMEM (členy hodnot)"};
+  for (int phase = 0; phase <= 10; phase++) {
     bool header = false;
     for (size_t i = 0; i < N_CASES; i++) {
       if (CASES[i].phase != phase || !selected(&CASES[i], only)) continue;
@@ -4165,14 +4514,14 @@ int main(int argc, char **argv) {
     }
   }
   if (ran == 0) {
-    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7, f8 a", only);
+    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10 a", only);
     for (size_t i = 0; i < N_CASES; i++) printf(" %s", CASES[i].name);
     printf("\n");
     return 2;
   }
 
   printf("== Výsledek: OK %d, chyby %d", total_ok, total_bad);
-  for (int phase = 0; phase <= 8; phase++)
+  for (int phase = 0; phase <= 10; phase++)
     if (phase_ok[phase] + phase_bad[phase] > 0)
       printf("   (fáze %d: %d/%d)", phase, phase_ok[phase], phase_ok[phase] + phase_bad[phase]);
   printf("\n");

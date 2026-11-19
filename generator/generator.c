@@ -7,134 +7,66 @@
  * Date: September 2026
  */
 
-#include "ast.h"
-#include "gen_internal.h"
 #include "generator.h"
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-// budu potřebovat konst. pro instukce (move, add ...) ale i pro operatory binop
-// atd...
-/*
- * frame instructions
- */
-void cg_move() {}
-void cg_create_frame(){}
-void cg_push_frame(){}
-void cg_pop_frame(){}
-void cg_def_var(){}
-void cd_call(){}
-void cg_return(){}
-
-/*
- * stack insturctions
- */
-void cg_pushs(){}
-void cg_pops(){}
-void cg_clears(){}
-
-/*
- *Arithemtic, relational, boolean conversion instructions
- */
-//frame ins.
-void cg_add(){}
-void cg_sub(){}
-void cg_mul(){}
-void cg_div(){}
-//stack ins.
-void cg_idiv(){}
-void cg_adds(){}
-void cg_subs(){}
-void cg_muls(){}
-void cg_divs(){}
-void cg_idivs(){}
-//relation ins.
-void cg_lt(){}
-void cg_gt(){}
-void cg_eq(){}
-//stack realtion ins.
-void cg_lts(){}
-void cg_gts(){}
-void cg_eqs(){}
-//logic ins.
-void cg_and(){}
-void cg_or(){}
-void cg_not(){}
-//stack logic ins.
-void cg_ands(){}
-void cg_ors(){}
-void cg_nots(){}
-//conversion ins.
-void cg_int_to_float(){}
-void cg_float_to_int(){}
-void cg_int_to_char(){}
-void cg_str_to_int(){}
-void cg_float_to_str(){}
-void cg_int_to_str(){}
-//stack conversion ins.
-void cg_int_to_foat_s(){}
-void cg_float_to_int_s(){}
-void cg_int_to_char_s(){}
-void cg_str_to_int_s(){}
-void float_to_str_s(){}
-void int_to_str_s(){}
-
-/*
- *I/O ins.
- */
-void cg_read(){}
-void cg_write(){}
-
-/*
- *strings ins.
- */
-void cg_concat(){}
-void cg_strlen(){ }
-void cg_getchar(){}
-void cg_setchar(){}
-
-/*
- *field ins.
- */
-void cg_new_array(){}
-void cg_array_get(){}
-void cg_array_set(){}
-
-/*
- *type ins.
- */
-void cg_type(){}
-void cg_isint(){}
-//stack type ins.
-void cg_types(){}
-void cg_isints(){}
-
-/*
- *control flow ins.
- */
-void cg_label(){}
-void cg_jump(){}
-void cg_jumg_if_eg(){}
-void cg_jump_if_neg(){}
-//stakc control flow
-void cg_jump_if_eq_s(){}
-void cg_jump_if_neq_s(){}
-void cg_exit(){}
-
-/*
- *debugging ins.
- */
-void cg_break(){}
-void cg_dprint(){}
-
-
-
-
+#include "ast.h"
+#include "gen_internal.h"
 
 /*==========================================================
  *       nova verze - snad spravna
-*===========================================================
+ *===========================================================
  */
+
+
+//valmem
+void lower_members(AST_NODE *root) {
+
+  for (AST_NODE *fn = root; fn; fn = fn->next) {
+    if (fn->left)lower_members(fn->left);
+    if (fn->right)lower_members(fn->right);
+    if (fn->third)lower_members(fn->third);
+
+
+    if (fn->type == NODE_CALL && fn->is_method == true && fn->has_parens ==false && fn->left) {
+      if (strcmp(fn->name, "toString") == 0) {
+        free(fn->name);
+        ast_name(fn, "toStr");
+        fn->third = fn->left;
+        fn->left = NULL;
+        fn->is_method = false;
+        fn->has_parens = true;
+      }
+      else if (strcmp(fn->name,"length")==0) {
+        free(fn->name);
+        ast_name(fn, "strLength");
+        fn->third = fn->left;
+        fn->left = NULL;
+        fn->is_method = false;
+        fn->has_parens = true;
+      }
+      else if (strcmp(fn->name,"floor")==0) {
+        free(fn->name);
+        ast_name(fn, "$floor");
+        fn->third = fn->left;
+        fn->left = NULL;
+        fn->is_method = false;
+        fn->has_parens = true;
+      }
+      else if (strcmp(fn->name,"toInt")==0) {
+        fn->third = fn->left;
+        fn->left = NULL;
+        fn->is_method = false;
+        fn->has_parens = true;
+      }
+    }
+
+  }
+}
+
 
 int new_label(Gen *gen) {
   return gen->label_counter++;

@@ -12,6 +12,8 @@
  * Prompt: "mohl by se je (builtins) vypsat do gen_builtins, podepis se pod to a dej mi postup,
  *          jak to implementovat v těch ostatních souborech"
  * Zrevidoval a odevzdává: Pavel Novák (xnovakp01)
+ * Doplnění 2026-11-19 (rozšíření VALMEM, funkce floor a volání lower_members): Claude Sonnet 5.5,
+ *   prompt "co mam delat pro rozsireni valmem".
  * Ověřeno testem test_generator (fáze 6) v simulátoru i v ic26int.
  * ---------------------------------------------------------------------------
  *
@@ -36,6 +38,8 @@
 #include "ast.h"
 #include "gen_internal.h"
 
+void lower_members(AST_NODE *fn); /*gen_valmem.c */
+
 /* ------------------------------------------------------------------------- */
 /*  Které vestavěné funkce existují a které program používá                  */
 /* ------------------------------------------------------------------------- */
@@ -43,12 +47,13 @@
 enum {
   B_READLINE, B_READINT, B_READDOUBLE, B_TOSTR, B_TOINT, B_STRLENGTH, B_SUBSTR, B_ORD, B_CHR,
   B_READBOOLEAN, /* rozšíření BOOLTHEN */
+  B_FLOOR,       /* rozšíření VALMEM: člen .floor (interní jméno, aby se nepletlo s uživatelskou funkcí) */
   B_COUNT
 };
 
 static const char *const BUILTIN_NAME[B_COUNT] = {"readLine", "readInt", "readDouble", "toStr", "toInt",
                                                   "strLength", "subStr",  "ord",        "chr",
-                                                  "readBoolean"};
+                                                  "readBoolean", "$floor"};
 
 /* kolikrát se v programu volá každá vestavěná funkce (jen zda vůbec: 0 nebo víc) */
 static bool used[B_COUNT];
@@ -167,6 +172,29 @@ static void def_unary(const char *label, const char *instruction) {
   puts("RETURN");
 }
 
+/* floor (rozšíření VALMEM, člen Double.floor): největší celé číslo, které není větší než argument,
+ * ale jako Double. FLOAT2INT osekává k nule, takže u záporných neceločíselných čísel je výsledek
+ * o 1 větší, než má být (-2.5 -> -2); tehdy se 1.0 odečte. */
+static void def_floor(void) {
+  puts("LABEL $b_$floor");
+  puts("CREATEFRAME");
+  puts("PUSHFRAME");
+  puts("DEFVAR LF@x");
+  puts("DEFVAR LF@t");
+  puts("DEFVAR LF@f");
+  puts("DEFVAR LF@c");
+  puts("POPS LF@x");
+  puts("FLOAT2INT LF@t LF@x");
+  puts("INT2FLOAT LF@f LF@t");
+  puts("GT LF@c LF@f LF@x");
+  puts("JUMPIFEQ $b_$floor$ok LF@c bool@false");
+  puts("SUB LF@f LF@f float@0x1p+0");
+  puts("LABEL $b_$floor$ok");
+  puts("PUSHS LF@f");
+  puts("POPFRAME");
+  puts("RETURN");
+}
+
 /* toStr(Boolean): "true" nebo "false" */
 static void def_tostr_bool(void) {
   puts("LABEL $b_toStr_bool");
@@ -268,6 +296,7 @@ void emit_builtins(Gen *gen, AST_NODE *root) {
   (void)gen;
   memset(used, 0, sizeof used);
   used_tostr_int = used_tostr_float = used_tostr_bool = false;
+  lower_members(root); /* VALMEM: x.toString apod. se přepíše na volání vestavěné funkce (gen_valmem.c) */
   scan(root);
 
   if (used[B_READLINE]) def_read("readLine", "string", "string@");
@@ -278,6 +307,7 @@ void emit_builtins(Gen *gen, AST_NODE *root) {
   if (used_tostr_float) def_unary("toStr_float", "FLOAT2STR"); /* vždy %.2f, např. 2.50 */
   if (used_tostr_bool) def_tostr_bool();
   if (used[B_TOINT]) def_unary("toInt", "FLOAT2INT"); /* osekne k nule */
+  if (used[B_FLOOR]) def_floor();
   if (used[B_STRLENGTH]) def_unary("strLength", "STRLEN");
   if (used[B_CHR]) def_unary("chr", "INT2CHAR"); /* mimo 0 až 127 skončí interpret chybou 58 */
   if (used[B_ORD]) def_ord();

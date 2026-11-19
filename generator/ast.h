@@ -125,8 +125,8 @@ struct AST_NODE{
 
   //params
 
-  int list_cnt;
-  int list_param_cnt;
+  int list_no;
+  int list_more_lists;
 
   char *name;
   bool inclusive;
