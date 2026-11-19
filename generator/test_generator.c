@@ -4,7 +4,8 @@
  *                            2: výrazy, 3: proměnné, 4: if a while, 5: funkce,
  *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN, 8: rozšíření CONTROL – cyklus for a if jako výraz,
  *                            9: rozšíření FUNEXP – volání funkcí ve výrazech,
- *                            10: rozšíření VALMEM – členy hodnot)
+ *                            10: rozšíření VALMEM – členy hodnot,
+ *                            11: INTERPOLATEDS, 12: PARAMLISTS, 13: EXTKW)
  *
  * ---------------------------------------------------------------------------
  * Tento soubor vygenerovala AI: Claude Sonnet 5.5 (Anthropic, claude-sonnet-5-5), 2026-11-17.
@@ -23,6 +24,7 @@
  *            CONTROL: for + if jako výraz; testy se záporným krokem odebrány)
  * Prompt 11: "funexp? ..." (fáze 9: rozšíření FUNEXP, volání funkcí uvnitř výrazů)
  * Prompt 12: "co mam delat pro rozsireni valmem" (fáze 10: rozšíření VALMEM, členy .toString .toInt .length .floor)
+ * Prompt 13: "chci udelat paramlists, extkw a interpolateds" (fáze 11 až 13; tvar AST je popsaný nad testy)
  * Zadal a zrevidoval: Pavel Novák (xnovakp01)
  * ---------------------------------------------------------------------------
  *
@@ -40,8 +42,8 @@
  *         -o test_generator && ./test_generator
  *
  * POUŽITÍ
- *     ./test_generator              všechny případy (fáze 0 až 10)
- *     ./test_generator f8           jen fáze 8 (f0 až f10 = jen ta fáze)
+ *     ./test_generator              všechny případy (fáze 0 až 13)
+ *     ./test_generator f8           jen fáze 8 (f0 až f13 = jen ta fáze)
  *     ./test_generator f1_string    jen případ s tímto jménem
  *     ./test_generator -v           vypíše vygenerovaný kód i u případů, které prošly
  *     INTERP=cesta/k/ic26int ./test_generator
@@ -1131,6 +1133,11 @@ static AST_NODE *build_f5_fib(void) { /* fib(10) = 55: dvě rekurzivní volání
   AST_NODE *f = fdef("fib", I, par("n", 1, I, NULL), body, NULL);
   return make_program(main_fn(
       vdef("r", 10, true, I, fcall("fib", lit_i(10), I), print_stmt(UI("r", 10), NULL)), f));
+}
+
+static AST_NODE *build_f5_same_var_id(void) { /* val a v main a val a ve funkci mají stejné jméno i číslo (číslování po funkcích) */
+  AST_NODE *helper = fdef("helper", DATA_UNIT, NULL, vdef("a", 10, true, DATA_INT, lit_i(2), print_stmt(use("a", 10, DATA_INT), NULL)), NULL);
+  return make_program(main_fn(vdef("a", 10, true, DATA_INT, lit_i(1), print_stmt(use("a", 10, DATA_INT), fcall_stmt(fcall("helper", NULL, DATA_UNIT), NULL))), helper));
 }
 static AST_NODE *build_f5_sum_rec(void) { /* sumTo(20) = 210: hloubka rekurze 20 */
   AST_NODE *body = if_stmt(
@@ -2365,6 +2372,325 @@ static AST_NODE *build_f10_user_floor(void) { /* uživatelská funkce floor se n
 #undef D10
 #undef B10
 
+
+/* ------------------------------------------------------------------------- */
+/* fáze 11, 12, 13: rozšíření INTERPOLATEDS, PARAMLISTS a EXTKW.
+ * Tvar AST pro ně není v ast.h jednoznačně popsaný, proto je tady zvolený takto (musí s ním souhlasit
+ * parser; kdyby vypadal jinak, stačí upravit stavěcí funkce v tomhle bloku):
+ *
+ * INTERPOLATEDS (s"hi $name!" apod.)
+ *   uzel NODE_INTERP z interpolades(), data_type String. V left je řetěz částí přes next:
+ *   každá část je výraz s vlastním data_type (text = řetězcový literál, $id = proměnná,
+ *   ${výraz} = výraz). Hodnota každé části se převádí jako toStr (Double na %.2f) a spojují se.
+ *
+ * PARAMLISTS (def add(a: Int)(b: Int), def answer: Int, add(1)(2))
+ *   definice: fn->third = řetěz uzlů NODE_PARAM_LIST (přes next), v left každého je řetěz NODE_PARAM
+ *   (prázdný seznam = left NULL); funkce bez seznamu parametrů: has_parens = false, third = NULL.
+ *   volání: call->third = řetěz uzlů NODE_PARAM_LIST, v left každého řetěz argumentů; volání funkce
+ *   bez seznamu argumentů: NODE_CALL s has_parens = false a third = NULL.
+ *   Jména parametrů mají unikátní čísla napříč všemi seznamy funkce.
+ *
+ * EXTKW (extension (value: Int) def twice: Int = value * 2; x.twice; x.plus(12))
+ *   definice: NODE_FUNC_DEF s is_extension = true, v params je PŘÍJEMCE jako první parametr a za ním
+ *   parametry metody; has_parens = false pro metodu bez závorek.
+ *   volání: NODE_CALL z ast_method_call_create: příjemce v left, is_method = true, has_parens podle
+ *   zápisu (x.twice = false, x.foo() = true), v third argumenty. Typ výsledku je data_type uzlu.
+ * Čísla proměnných: parametry funkcí od 1, proměnné v main od 10. */
+#define XI DATA_INT
+#define XS DATA_STRING
+#define XD DATA_DOUBLE
+#define XB DATA_BOOL
+#define XUI(n, id) use((n), (id), XI)
+#define XUS(n, id) use((n), (id), XS)
+#define XUD(n, id) use((n), (id), XD)
+#define XUB(n, id) use((n), (id), XB)
+#define XP(e, nx) print_stmt((e), (nx))
+#define XPS(s, nx) print_stmt(lit_s(s), (nx))
+#define XL(v) lit_i(v)
+#define XADD(l, r) bin(OP_ADD, (l), (r), XI)
+#define XSUB(l, r) bin(OP_SUB, (l), (r), XI)
+#define XMUL(l, r) bin(OP_MUL, (l), (r), XI)
+#define XLT(l, r) bin(OP_LT, (l), (r), XB)
+#define XGT(l, r) bin(OP_GT, (l), (r), XB)
+#define XEQ(l, r) bin(OP_EQ, (l), (r), XB)
+static AST_NODE *xprog(AST_NODE *body, AST_NODE *funcs) { return make_program(main_fn(body, funcs)); }
+static AST_NODE *xmember(const char *name, AST_NODE *recv, DATA_TYPE t) {
+  AST_NODE *n = ast_method_call_create(NULL, (char *)name, true, false, recv, NULL);
+  n->data_type = t;
+  return n;
+}
+
+/* ---------------- fáze 11: INTERPOLATEDS ---------------- */
+static AST_NODE *interp(AST_NODE *parts) {
+  AST_NODE *n = interpolades(parts, NULL);
+  n->data_type = XS;
+  return n;
+}
+/* val name = "IFJ" (id 10), val n = 26 (id 11) a pak tělo */
+static AST_NODE *with_nn(AST_NODE *rest) {
+  return vdef("name", 10, true, XS, lit_s("IFJ"), vdef("n", 11, true, XI, XL(26), rest));
+}
+static AST_NODE *build_f11_text(void) { return xprog(XP(interp(lit_s("hello")), NULL), NULL); }
+static AST_NODE *build_f11_var(void) { return xprog(with_nn(XP(interp(XUS("name", 10)), NULL)), NULL); }
+static AST_NODE *build_f11_text_var(void) { /* s"hi $name!" */
+  return xprog(with_nn(XP(interp(a3(lit_s("hi "), XUS("name", 10), lit_s("!"))), NULL)), NULL);
+}
+static AST_NODE *build_f11_expr(void) { /* s"${n + 1}" */
+  return xprog(with_nn(XP(interp(XADD(XUI("n", 11), XL(1))), NULL)), NULL);
+}
+static AST_NODE *build_f11_spec(void) { /* print(s"$name${n + 1} costs $$0") ze zadání */
+  return xprog(with_nn(XP(interp(a3(XUS("name", 10), XADD(XUI("n", 11), XL(1)), lit_s(" costs $0"))), NULL)), NULL);
+}
+static AST_NODE *build_f11_double(void) { return xprog(XP(interp(a2(lit_s("x="), lit_d(2.5))), NULL), NULL); }
+static AST_NODE *build_f11_bool(void) { return xprog(XP(interp(a2(lit_s("b="), lit_b(true))), NULL), NULL); }
+static AST_NODE *build_f11_int_var(void) { return xprog(with_nn(XP(interp(a2(lit_s("n="), XUI("n", 11))), NULL)), NULL); }
+static AST_NODE *build_f11_empty(void) { return xprog(XPS("<", XP(interp(lit_s("")), XPS(">", NULL))), NULL); }
+static AST_NODE *build_f11_val(void) { /* val t = s"<$n"; print(t) */
+  return xprog(with_nn(vdef("t", 12, true, XS, interp(a2(lit_s("<"), XUI("n", 11))), XP(XUS("t", 12), NULL))), NULL);
+}
+static AST_NODE *build_f11_concat(void) { /* "[" + s"$n" + "]" */
+  return xprog(with_nn(XP(bin(OP_ADD, bin(OP_ADD, lit_s("["), interp(XUI("n", 11)), XS), lit_s("]"), XS), NULL)), NULL);
+}
+static AST_NODE *build_f11_call(void) { /* s"${twice(3)}" */
+  return xprog(XP(interp(fcall("twice", XL(3), XI)), NULL), twice9_fn(NULL));
+}
+static AST_NODE *build_f11_member(void) { /* s"${"abc".length}" */
+  return xprog(XP(interp(xmember("length", lit_s("abc"), XI)), NULL), NULL);
+}
+static AST_NODE *build_f11_for(void) { /* for i <- 1 to 3: print(s"i=$i;") */
+  return xprog(for_stmt("i", 1, XL(1), XL(3), NULL, true, NULL,
+                        XP(interp(a3(lit_s("i="), XUI("i", 1), lit_s(";"))), NULL), NULL), NULL);
+}
+static AST_NODE *build_f11_types(void) { /* Int a Double ve dvou interpolacích (obě varianty toStr, definice jen jednou) */
+  return xprog(with_nn(XP(interp(a4(lit_s("n="), XUI("n", 11), lit_s(" d="), lit_d(1.5))),
+                          XP(interp(a4(lit_s("n="), XUI("n", 11), lit_s(" d="), lit_d(1.5))), NULL))), NULL);
+}
+static AST_NODE *build_f11_two_strs(void) { /* s"$a$b" */
+  return xprog(vdef("a", 10, true, XS, lit_s("x"), vdef("b", 11, true, XS, lit_s("y"),
+                    XP(interp(a2(XUS("a", 10), XUS("b", 11))), NULL))), NULL);
+}
+static AST_NODE *build_f11_arg(void) { /* strLength(s"abc$n") */
+  return xprog(with_nn(XP(fcall("strLength", interp(a2(lit_s("abc"), XUI("n", 11))), XI), NULL)), NULL);
+}
+static AST_NODE *build_f11_ife(void) { /* s"v=${if n > 5 then 1 else 0}" */
+  return xprog(with_nn(XP(interp(a2(lit_s("v="), ife(XGT(XUI("n", 11), XL(5)), flast(XL(1), NULL), flast(XL(0), NULL), XI))), NULL)), NULL);
+}
+static AST_NODE *build_f11_dollar(void) { return xprog(XP(interp(lit_s("$")), NULL), NULL); }
+static AST_NODE *build_f11_newline(void) { return xprog(XP(interp(a2(lit_s("a\n"), lit_s("b"))), NULL), NULL); }
+static AST_NODE *build_f11_nested(void) { /* s"[${s"<$n"}" */
+  return xprog(with_nn(XP(interp(a2(lit_s("["), interp(a2(lit_s("<"), XUI("n", 11))))), NULL)), NULL);
+}
+
+/* ---------------- fáze 12: PARAMLISTS ---------------- */
+static AST_NODE *plist(AST_NODE *items, AST_NODE *next) { return ast_create_param_list(items, next, 0); }
+static AST_NODE *fdef_lists(const char *name, DATA_TYPE ret, bool parens, AST_NODE *lists, AST_NODE *body, AST_NODE *next) {
+  return ast_func_def_create(make_body(body), lists, next, ret, (char *)name, false, parens);
+}
+static AST_NODE *call_lists(const char *name, bool parens, AST_NODE *lists, DATA_TYPE t) {
+  AST_NODE *n = ast_call_create(lists, (char *)name, false, parens, NULL);
+  n->data_type = t;
+  return n;
+}
+/* add2(a)(b) = a + b */
+static AST_NODE *add2_fn(AST_NODE *next) {
+  return fdef_lists("add2", XI, true, plist(par("a", 1, XI, NULL), plist(par("b", 2, XI, NULL), NULL)),
+                    flast(XADD(XUI("a", 1), XUI("b", 2)), NULL), next);
+}
+#define ADD2(x, y) call_lists("add2", true, plist((x), plist((y), NULL)), XI)
+static AST_NODE *answer_fn(AST_NODE *next) { return fdef_lists("answer", XI, false, NULL, flast(XL(42), NULL), next); }
+#define ANSWER() call_lists("answer", false, NULL, XI)
+
+static AST_NODE *build_f12_noparens(void) { return xprog(XP(ANSWER(), NULL), answer_fn(NULL)); }
+static AST_NODE *build_f12_noparens_each(void) { /* def tick: Int = { print("x"); 1 }: tělo se vyhodnotí při každém použití */
+  AST_NODE *tick = fdef_lists("tick", XI, false, NULL, XPS("x", flast(XL(1), NULL)), NULL);
+  return xprog(XP(XADD(call_lists("tick", false, NULL, XI), call_lists("tick", false, NULL, XI)), NULL), tick);
+}
+static AST_NODE *build_f12_parens_empty(void) { /* def five(): Int = 5 volaná jako five() */
+  return xprog(XP(fcall("five", NULL, XI), NULL), fdef("five", XI, NULL, flast(XL(5), NULL), NULL));
+}
+static AST_NODE *build_f12_two(void) { return xprog(XP(ADD2(XL(1), XL(2)), NULL), add2_fn(NULL)); }
+static AST_NODE *build_f12_three(void) { /* add3(a)(b)(c) */
+  AST_NODE *f = fdef_lists("add3", XI, true,
+      plist(par("a", 1, XI, NULL), plist(par("b", 2, XI, NULL), plist(par("c", 3, XI, NULL), NULL))),
+      flast(XADD(XADD(XUI("a", 1), XUI("b", 2)), XUI("c", 3)), NULL), NULL);
+  return xprog(XP(call_lists("add3", true, plist(XL(1), plist(XL(10), plist(XL(100), NULL))), XI), NULL), f);
+}
+static AST_NODE *build_f12_empty_first(void) { /* offset()(value) = value + 1 */
+  AST_NODE *f = fdef_lists("offset", XI, true, plist(NULL, plist(par("value", 1, XI, NULL), NULL)),
+                           flast(XADD(XUI("value", 1), XL(1)), NULL), NULL);
+  return xprog(XP(call_lists("offset", true, plist(NULL, plist(XL(5), NULL)), XI), NULL), f);
+}
+static AST_NODE *build_f12_empty_last(void) { /* g(a)() = a */
+  AST_NODE *f = fdef_lists("g", XI, true, plist(par("a", 1, XI, NULL), plist(NULL, NULL)), flast(XUI("a", 1), NULL), NULL);
+  return xprog(XP(call_lists("g", true, plist(XL(7), plist(NULL, NULL)), XI), NULL), f);
+}
+static AST_NODE *build_f12_order(void) { /* sub(a)(b) = a - b: pořadí parametrů */
+  AST_NODE *f = fdef_lists("sub", XI, true, plist(par("a", 1, XI, NULL), plist(par("b", 2, XI, NULL), NULL)),
+                           flast(XSUB(XUI("a", 1), XUI("b", 2)), NULL), NULL);
+  return xprog(XP(call_lists("sub", true, plist(XL(10), plist(XL(3), NULL)), XI), NULL), f);
+}
+static AST_NODE *build_f12_arg_order(void) { /* add2(show(1))(show(2)): argumenty zleva doprava */
+  return xprog(XP(ADD2(fcall("show9", XL(1), XI), fcall("show9", XL(2), XI)), NULL), show9_fn(add2_fn(NULL)));
+}
+static AST_NODE *build_f12_args_expr(void) { /* add2(1 + 2)(twice(3)) */
+  return xprog(XP(ADD2(XADD(XL(1), XL(2)), fcall("twice", XL(3), XI)), NULL), twice9_fn(add2_fn(NULL)));
+}
+static AST_NODE *build_f12_in_expr(void) { /* 2 * add2(1)(2) + 1 */
+  return xprog(XP(XADD(XMUL(XL(2), ADD2(XL(1), XL(2))), XL(1)), NULL), add2_fn(NULL));
+}
+static AST_NODE *build_f12_spec(void) { /* příklad ze zadání: vypíše 86 */
+  AST_NODE *add = fdef_lists("add", XI, true,
+      plist(par("a", 1, XI, NULL), plist(par("b", 2, XI, NULL), plist(par("c", 3, XI, NULL), NULL))),
+      flast(XADD(XADD(XUI("a", 1), XUI("b", 2)), XUI("c", 3)), NULL), NULL);
+  AST_NODE *offset = fdef_lists("offset", XI, true, plist(NULL, plist(par("value", 1, XI, NULL), NULL)),
+      flast(XADD(XUI("value", 1), XL(1)), NULL), add);
+  AST_NODE *awp = fdef("answerWithParens", XI, NULL, flast(XL(42), NULL), offset);
+  AST_NODE *answer = answer_fn(awp);
+  AST_NODE *body =
+      vdef("x", 10, true, XI, ANSWER(),
+      vdef("y", 11, true, XI, fcall("answerWithParens", NULL, XI),
+      vdef("sum", 12, true, XI, call_lists("add", true, plist(XUI("x", 10), plist(XUI("y", 11), plist(XL(1), NULL))), XI),
+      vdef("result", 13, true, XI, call_lists("offset", true, plist(NULL, plist(XUI("sum", 12), NULL)), XI),
+           XP(XUI("result", 13), NULL)))));
+  return xprog(body, answer);
+}
+static AST_NODE *build_f12_types(void) { /* cat(s: String)(n: Int): String = s + toStr(n) */
+  AST_NODE *f = fdef_lists("cat", XS, true, plist(par("s", 1, XS, NULL), plist(par("n", 2, XI, NULL), NULL)),
+      flast(bin(OP_ADD, XUS("s", 1), fcall("toStr", XUI("n", 2), XS), XS), NULL), NULL);
+  return xprog(XP(call_lists("cat", true, plist(lit_s("a"), plist(XL(5), NULL)), XS), NULL), f);
+}
+static AST_NODE *build_f12_rec(void) { /* sum(n)(acc): rekurze přes seznamy, sum(5)(0) = 15 */
+  AST_NODE *body = if_stmt(XEQ(XUI("n", 1), XL(0)), fret(XUI("acc", 2), NULL), NULL,
+      fret(call_lists("sum", true, plist(XSUB(XUI("n", 1), XL(1)), plist(XADD(XUI("acc", 2), XUI("n", 1)), NULL)), XI), NULL));
+  AST_NODE *f = fdef_lists("sum", XI, true, plist(par("n", 1, XI, NULL), plist(par("acc", 2, XI, NULL), NULL)), body, NULL);
+  return xprog(XP(call_lists("sum", true, plist(XL(5), plist(XL(0), NULL)), XI), NULL), f);
+}
+static AST_NODE *build_f12_local(void) { /* parametry z obou seznamů a lokální proměnná v těle */
+  AST_NODE *f = fdef_lists("calc", XI, true, plist(par("a", 1, XI, NULL), plist(par("b", 2, XI, NULL), NULL)),
+      vdef("c", 3, true, XI, XMUL(XUI("a", 1), XUI("b", 2)), flast(XADD(XUI("c", 3), XL(1)), NULL)), NULL);
+  return xprog(XP(call_lists("calc", true, plist(XL(3), plist(XL(4), NULL)), XI), NULL), f);
+}
+static AST_NODE *build_f12_noparens_arg(void) { /* add2(answer)(answer) */
+  return xprog(XP(ADD2(ANSWER(), ANSWER()), NULL), answer_fn(add2_fn(NULL)));
+}
+static AST_NODE *build_f12_noparens_block(void) { /* def counter: Int = { val a = 5; a * 2 } */
+  AST_NODE *f = fdef_lists("counter", XI, false, NULL, vdef("a", 1, true, XI, XL(5), flast(XMUL(XUI("a", 1), XL(2)), NULL)), NULL);
+  return xprog(XP(call_lists("counter", false, NULL, XI), NULL), f);
+}
+static AST_NODE *build_f12_stmt(void) { /* volání jako příkaz, výsledek se zahodí */
+  return xprog(fcall_stmt(ADD2(XL(1), XL(2)), XPS("ok", NULL)), add2_fn(NULL));
+}
+static AST_NODE *build_f12_unit(void) { /* hello(a: String)(b: String): Unit */
+  AST_NODE *f = fdef_lists("hello", DATA_UNIT, true, plist(par("a", 1, XS, NULL), plist(par("b", 2, XS, NULL), NULL)),
+                           XP(XUS("a", 1), XP(XUS("b", 2), NULL)), NULL);
+  return xprog(fcall_stmt(call_lists("hello", true, plist(lit_s("x"), plist(lit_s("y"), NULL)), DATA_UNIT), NULL), f);
+}
+static AST_NODE *build_f12_loop(void) { /* for i <- 1 to 3: print(add2(i)(10)) = 11 12 13 */
+  return xprog(for_stmt("i", 1, XL(1), XL(3), NULL, true, NULL, XP(ADD2(XUI("i", 1), XL(10)), XPS(",", NULL)), NULL), add2_fn(NULL));
+}
+
+/* ---------------- fáze 13: EXTKW ---------------- */
+static AST_NODE *extfn(const char *name, DATA_TYPE ret, AST_NODE *params, bool parens, AST_NODE *body, AST_NODE *next) {
+  AST_NODE *n = ast_func_def_create(make_body(body), params, next, ret, (char *)name, false, parens);
+  n->is_extension = true;
+  return n;
+}
+static AST_NODE *xcall(const char *name, AST_NODE *recv, AST_NODE *args, bool parens, DATA_TYPE t) {
+  AST_NODE *n = ast_method_call_create(args, (char *)name, true, parens, recv, NULL);
+  n->data_type = t;
+  return n;
+}
+/* extension (value: Int) def twice: Int = value * 2 */
+static AST_NODE *x_twice(AST_NODE *next) {
+  return extfn("twice", XI, par("value", 1, XI, NULL), false, flast(XMUL(XUI("value", 1), XL(2)), NULL), next);
+}
+/* def foo(): String = "foo" + value.toString */
+static AST_NODE *x_foo(AST_NODE *next) {
+  return extfn("foo", XS, par("value", 1, XI, NULL), true,
+               flast(bin(OP_ADD, lit_s("foo"), xmember("toString", XUI("value", 1), XS), XS), NULL), next);
+}
+/* def plus(other: Int): Int = value + other */
+static AST_NODE *x_plus(AST_NODE *next) {
+  return extfn("plus", XI, par("value", 1, XI, par("other", 2, XI, NULL)), true,
+               flast(XADD(XUI("value", 1), XUI("other", 2)), NULL), next);
+}
+#define XTWICE(r) xcall("twice", (r), NULL, false, XI)
+static AST_NODE *build_f13_noparens(void) { return xprog(XP(XTWICE(XL(6)), NULL), x_twice(NULL)); }
+static AST_NODE *build_f13_empty_parens(void) { return xprog(XP(xcall("foo", XL(6), NULL, true, XS), NULL), x_foo(NULL)); }
+static AST_NODE *build_f13_param(void) { return xprog(XP(xcall("plus", XL(6), XL(12), true, XI), NULL), x_plus(NULL)); }
+static AST_NODE *build_f13_spec(void) { /* příklad ze zadání */
+  AST_NODE *body = vdef("x", 10, true, XI, XL(6),
+      vdef("y", 11, true, XI, XTWICE(XUI("x", 10)),
+      vdef("z", 12, true, XS, xcall("foo", XUI("x", 10), NULL, true, XS),
+      vdef("w", 13, true, XI, xcall("plus", XUI("x", 10), XL(12), true, XI),
+           XP(XUI("y", 11), XP(XUS("z", 12), XP(XUI("w", 13), NULL)))))));
+  return xprog(body, x_twice(x_foo(x_plus(NULL))));
+}
+static AST_NODE *build_f13_chain(void) { return xprog(XP(XTWICE(XTWICE(XL(6))), NULL), x_twice(NULL)); }
+static AST_NODE *build_f13_in_expr(void) { return xprog(XP(XADD(XTWICE(XL(6)), XL(1)), NULL), x_twice(NULL)); }
+static AST_NODE *build_f13_recv_expr(void) { return xprog(XP(XTWICE(XADD(XL(1), XL(2))), NULL), x_twice(NULL)); }
+static AST_NODE *build_f13_arg_expr(void) { return xprog(XP(xcall("plus", XL(6), XMUL(XL(2), XL(3)), true, XI), NULL), x_plus(NULL)); }
+static AST_NODE *build_f13_two_types(void) { /* stejné jméno metody pro Int a pro String */
+  AST_NODE *d_int = extfn("double", XI, par("value", 1, XI, NULL), false, flast(XMUL(XUI("value", 1), XL(2)), NULL), NULL);
+  AST_NODE *d_str = extfn("double", XS, par("value", 1, XS, NULL), false,
+                          flast(bin(OP_ADD, XUS("value", 1), XUS("value", 1), XS), NULL), d_int);
+  return xprog(XP(xcall("double", XL(3), NULL, false, XI), XP(xcall("double", lit_s("ab"), NULL, false, XS), NULL)), d_str);
+}
+static AST_NODE *build_f13_double(void) { /* extension (value: Double) def half: Double = value / 2.0 */
+  AST_NODE *h = extfn("half", XD, par("value", 1, XD, NULL), false, flast(bin(OP_DIV, XUD("value", 1), lit_d(2.0), XD), NULL), NULL);
+  return xprog(XP(fcall("toStr", xcall("half", lit_d(5.0), NULL, false, XD), XS), NULL), h);
+}
+static AST_NODE *build_f13_def_first(void) { /* definice metody je v programu před main */
+  AST_NODE *m = main_fn(XP(XTWICE(XL(21)), NULL), NULL);
+  return make_program(x_twice(m));
+}
+static AST_NODE *build_f13_calls_fn(void) { /* def viaTwice: Int = twice(value) kde twice je obyčejná funkce */
+  AST_NODE *v = extfn("viaTwice", XI, par("value", 1, XI, NULL), false, flast(fcall("twice", XUI("value", 1), XI), NULL), NULL);
+  return xprog(XP(xcall("viaTwice", XL(4), NULL, false, XI), NULL), twice9_fn(v));
+}
+static AST_NODE *build_f13_ext_ext(void) { /* def four: Int = value.twice.twice */
+  AST_NODE *f = extfn("four", XI, par("value", 1, XI, NULL), false, flast(XTWICE(XTWICE(XUI("value", 1))), NULL), x_twice(NULL));
+  return xprog(XP(xcall("four", XL(4), NULL, false, XI), NULL), f);
+}
+static AST_NODE *build_f13_recursion(void) { /* def fact: Int = if value < 2 then 1 else value * (value - 1).fact */
+  AST_NODE *body = ife(XLT(XUI("value", 1), XL(2)), flast(XL(1), NULL),
+                       flast(XMUL(XUI("value", 1), xcall("fact", XSUB(XUI("value", 1), XL(1)), NULL, false, XI)), NULL), XI);
+  AST_NODE *f = extfn("fact", XI, par("value", 1, XI, NULL), false, body, NULL);
+  return xprog(XP(xcall("fact", XL(5), NULL, false, XI), NULL), f);
+}
+static AST_NODE *build_f13_bool(void) { /* extension (value: Boolean) def negate: Boolean = !value */
+  AST_NODE *f = extfn("negate", XB, par("value", 1, XB, NULL), false, flast(not_op(XUB("value", 1)), NULL), NULL);
+  return xprog(XP(xcall("negate", lit_b(true), NULL, false, XB), NULL), f);
+}
+static AST_NODE *build_f13_for(void) { /* for i <- 1 to 3: print(i.twice) */
+  return xprog(for_stmt("i", 1, XL(1), XL(3), NULL, true, NULL, XP(XTWICE(XUI("i", 1)), NULL), NULL), x_twice(NULL));
+}
+static AST_NODE *build_f13_two_params(void) { /* def mix(a: Int, b: Int): Int = value + a * b */
+  AST_NODE *f = extfn("mix", XI, par("value", 1, XI, par("a", 2, XI, par("b", 3, XI, NULL))), true,
+                      flast(XADD(XUI("value", 1), XMUL(XUI("a", 2), XUI("b", 3))), NULL), NULL);
+  return xprog(XP(xcall("mix", XL(1), a2(XL(2), XL(3)), true, XI), NULL), f);
+}
+static AST_NODE *build_f13_var_recv(void) { /* var x = 4; x = x.twice */
+  return xprog(vdef("x", 10, false, XI, XL(4), assign(XUI("x", 10), XTWICE(XUI("x", 10)), XP(XUI("x", 10), NULL))), x_twice(NULL));
+}
+static AST_NODE *build_f13_string(void) { /* extension (value: String) def shout: String = value + "!" */
+  AST_NODE *f = extfn("shout", XS, par("value", 1, XS, NULL), false, flast(bin(OP_ADD, XUS("value", 1), lit_s("!"), XS), NULL), NULL);
+  return xprog(XP(xcall("shout", lit_s("hi"), NULL, false, XS), NULL), f);
+}
+static AST_NODE *build_f13_cond(void) { /* if 3.twice > 5 then print("Y") else print("N") */
+  return xprog(if_stmt(XGT(XTWICE(XL(3)), XL(5)), XPS("Y", NULL), XPS("N", NULL), NULL), x_twice(NULL));
+}
+static AST_NODE *build_f13_interp(void) { /* s"${4.twice}" */
+  return xprog(XP(interp(a2(lit_s("v="), XTWICE(XL(4)))), NULL), x_twice(NULL));
+}
+static AST_NODE *build_f13_valmem(void) { /* 5.twice.toString.length = "10".length = 2 */
+  return xprog(XP(xmember("length", xmember("toString", XTWICE(XL(5)), XS), XI), NULL), x_twice(NULL));
+}
+#undef XI
+#undef XS
+#undef XD
+#undef XB
+
 typedef struct {
   const char *name;
   int phase;
@@ -2635,6 +2961,7 @@ static const Case CASES[] = {
      "prázdný return v Unit funkci (vrací nil@nil)", "posneg", {NULL}},
     {"f5_ret_in_loop", 5, "main", {"firstOver", NULL}, build_f5_ret_in_loop,
      "return uvnitř while uvnitř if: firstOver(50) = 8", "8", {NULL}},
+    {"f5_same_var_id", 5, "main", {"helper", NULL}, build_f5_same_var_id, "proměnná a (stejné jméno i číslo) v main a v helper: každá funkce má DEFVAR jen svých proměnných", "12", {NULL}, NULL, 0},
     {"f5_ret_two_calls", 5, "main", {"twice", NULL}, build_f5_ret_two_calls, "a = twice(5), b = twice(6), print(a + b)",
      "22", {NULL}},
     {"f5_ret_discard", 5, "main", {"twice", NULL}, build_f5_ret_discard,
@@ -3017,6 +3344,74 @@ static const Case CASES[] = {
     F10("f10_floor_two", build_f10_floor_two, "dvě použití .floor (definice floor se vypíše jen jednou)", "1.00-2.00"),
     F10("f10_user_floor", build_f10_user_floor, "uživatelská funkce floor(n) a člen .floor v jednom programu", "103", "floor"),
 #undef F10
+
+#define FX(ph, nm, bld, ds, out, ...) {nm, ph, "main", {__VA_ARGS__}, bld, ds, out, {NULL}, NULL, 0}
+    FX(11, "f11_text", build_f11_text, "s\"hello\": jen text", "hello"),
+    FX(11, "f11_var", build_f11_var, "s\"$name\": proměnná String", "IFJ"),
+    FX(11, "f11_text_var", build_f11_text_var, "s\"hi $name!\": text, proměnná, text", "hi IFJ!"),
+    FX(11, "f11_expr", build_f11_expr, "s\"${n + 1}\": výraz", "27"),
+    FX(11, "f11_spec", build_f11_spec, "příklad ze zadání: $name${n + 1} costs $$0", "IFJ27 costs $0"),
+    FX(11, "f11_double", build_f11_double, "Double se vloží jako toStr (%.2f)", "x=2.50"),
+    FX(11, "f11_bool", build_f11_bool, "Boolean se vloží jako true/false", "b=true"),
+    FX(11, "f11_int_var", build_f11_int_var, "s\"n=$n\": proměnná Int", "n=26"),
+    FX(11, "f11_empty", build_f11_empty, "interpolace s prázdným řetězcem", "<>"),
+    FX(11, "f11_val", build_f11_val, "val t = s\"<$n\"", "<26"),
+    FX(11, "f11_concat", build_f11_concat, "\"[\" + s\"$n\" + \"]\"", "[26]"),
+    FX(11, "f11_call", build_f11_call, "s\"${twice(3)}\": volání funkce (s FUNEXP)", "6", "twice"),
+    FX(11, "f11_member", build_f11_member, "s\"${\"abc\".length}\": člen (s VALMEM)", "3"),
+    FX(11, "f11_for", build_f11_for, "interpolace v těle cyklu for", "i=1;i=2;i=3;"),
+    FX(11, "f11_types", build_f11_types, "Int a Double ve dvou interpolacích za sebou", "n=26 d=1.50n=26 d=1.50"),
+    FX(11, "f11_two_strs", build_f11_two_strs, "s\"$a$b\": dvě proměnné vedle sebe", "xy"),
+    FX(11, "f11_arg", build_f11_arg, "strLength(s\"abc$n\"): interpolace jako argument", "5"),
+    FX(11, "f11_ife", build_f11_ife, "s\"v=${if n > 5 then 1 else 0}\"", "v=1"),
+    FX(11, "f11_dollar", build_f11_dollar, "text se znakem $", "$"),
+    FX(11, "f11_newline", build_f11_newline, "text s koncem řádku", "a\nb"),
+    FX(11, "f11_nested", build_f11_nested, "interpolace uvnitř interpolace", "[<26"),
+
+    FX(12, "f12_noparens", build_f12_noparens, "def answer: Int = 42, použití bez závorek", "42", "answer"),
+    FX(12, "f12_noparens_each", build_f12_noparens_each, "def tick: tělo se vyhodnotí při každém použití", "xx2", "tick"),
+    FX(12, "f12_parens_empty", build_f12_parens_empty, "def five(): Int volaná jako five() (kontrola)", "5", "five"),
+    FX(12, "f12_two", build_f12_two, "add2(1)(2): dva seznamy", "3", "add2"),
+    FX(12, "f12_three", build_f12_three, "add3(1)(10)(100): tři seznamy", "111", "add3"),
+    FX(12, "f12_empty_first", build_f12_empty_first, "offset()(5): prázdný první seznam", "6", "offset"),
+    FX(12, "f12_empty_last", build_f12_empty_last, "g(7)(): prázdný poslední seznam", "7", "g"),
+    FX(12, "f12_order", build_f12_order, "sub(10)(3): pořadí parametrů", "7", "sub"),
+    FX(12, "f12_arg_order", build_f12_arg_order, "add2(show(1))(show(2)): argumenty zleva doprava", "123", "show9", "add2"),
+    FX(12, "f12_args_expr", build_f12_args_expr, "add2(1 + 2)(twice(3)): argumenty jsou výrazy", "9", "twice", "add2"),
+    FX(12, "f12_in_expr", build_f12_in_expr, "2 * add2(1)(2) + 1: volání ve výrazu", "7", "add2"),
+    FX(12, "f12_spec", build_f12_spec, "příklad ze zadání, vypíše 86", "86", "answer", "add"),
+    FX(12, "f12_types", build_f12_types, "cat(\"a\")(5): String a Int", "a5", "cat"),
+    FX(12, "f12_rec", build_f12_rec, "rekurze přes seznamy: sum(5)(0)", "15", "sum"),
+    FX(12, "f12_local", build_f12_local, "parametry ze dvou seznamů a lokální proměnná", "13", "calc"),
+    FX(12, "f12_noparens_arg", build_f12_noparens_arg, "add2(answer)(answer)", "84", "answer", "add2"),
+    FX(12, "f12_noparens_block", build_f12_noparens_block, "def counter: tělo jako blok s proměnnou", "10", "counter"),
+    FX(12, "f12_stmt", build_f12_stmt, "volání s více seznamy jako příkaz", "ok", "add2"),
+    FX(12, "f12_unit", build_f12_unit, "hello(\"x\")(\"y\"): funkce typu Unit", "xy", "hello"),
+    FX(12, "f12_loop", build_f12_loop, "add2(i)(10) v cyklu for", "11,12,13,", "add2"),
+
+    FX(13, "f13_noparens", build_f13_noparens, "6.twice: metoda bez závorek", "12"),
+    FX(13, "f13_empty_parens", build_f13_empty_parens, "6.foo(): metoda s prázdnými závorkami", "foo6"),
+    FX(13, "f13_param", build_f13_param, "6.plus(12): metoda s parametrem", "18"),
+    FX(13, "f13_spec", build_f13_spec, "příklad ze zadání: twice, foo(), plus(12)", "12foo618"),
+    FX(13, "f13_chain", build_f13_chain, "6.twice.twice: příjemce je volání metody", "24"),
+    FX(13, "f13_in_expr", build_f13_in_expr, "6.twice + 1", "13"),
+    FX(13, "f13_recv_expr", build_f13_recv_expr, "(1 + 2).twice: příjemce je výraz", "6"),
+    FX(13, "f13_arg_expr", build_f13_arg_expr, "6.plus(2 * 3): argument je výraz", "12"),
+    FX(13, "f13_two_types", build_f13_two_types, "metoda double pro Int a pro String (různé typy, stejné jméno)", "6abab"),
+    FX(13, "f13_double", build_f13_double, "extension (value: Double) def half", "2.50"),
+    FX(13, "f13_def_first", build_f13_def_first, "definice metody je v programu před main", "42"),
+    FX(13, "f13_calls_fn", build_f13_calls_fn, "metoda volá obyčejnou funkci", "8", "twice"),
+    FX(13, "f13_ext_ext", build_f13_ext_ext, "metoda volá jinou metodu: 4.four", "16"),
+    FX(13, "f13_recursion", build_f13_recursion, "rekurzivní metoda: 5.fact", "120"),
+    FX(13, "f13_bool", build_f13_bool, "extension (value: Boolean) def negate", "false"),
+    FX(13, "f13_for", build_f13_for, "i.twice v cyklu for", "246"),
+    FX(13, "f13_two_params", build_f13_two_params, "1.mix(2, 3): metoda se dvěma parametry", "7"),
+    FX(13, "f13_var_recv", build_f13_var_recv, "x = x.twice s proměnnou", "8"),
+    FX(13, "f13_string", build_f13_string, "extension (value: String) def shout", "hi!"),
+    FX(13, "f13_cond", build_f13_cond, "if 3.twice > 5: metoda v podmínce", "Y"),
+    FX(13, "f13_interp", build_f13_interp, "metoda uvnitř interpolace (EXTKW + INTERPOLATEDS)", "v=8"),
+    FX(13, "f13_valmem", build_f13_valmem, "5.twice.toString.length (EXTKW + VALMEM)", "2"),
+#undef FX
 };
 #define N_CASES (sizeof CASES / sizeof CASES[0])
 
@@ -4489,13 +4884,16 @@ int main(int argc, char **argv) {
   const char *interp = find_interpreter(interp_buf, sizeof interp_buf, &explicit_env);
 
   int total_ok = 0, total_bad = 0, ran = 0;
-  int phase_ok[11] = {0}, phase_bad[11] = {0};
-  static const char *const PHASE_NAME[11] = {"kostra programu a funkcí", "konstanty a print",
+  int phase_ok[14] = {0}, phase_bad[14] = {0};
+  static const char *const PHASE_NAME[14] = {"kostra programu a funkcí", "konstanty a print",
                                            "výrazy", "proměnné", "if a while", "funkce",
                                            "vestavěné funkce", "rozšíření BOOLTHEN", "rozšíření CONTROL (cyklus for)",
                                            "rozšíření FUNEXP (volání ve výrazech)",
-                                           "rozšíření VALMEM (členy hodnot)"};
-  for (int phase = 0; phase <= 10; phase++) {
+                                           "rozšíření VALMEM (členy hodnot)",
+                                           "rozšíření INTERPOLATEDS (interpolované řetězce)",
+                                           "rozšíření PARAMLISTS (více seznamů parametrů)",
+                                           "rozšíření EXTKW (rozšiřující metody)"};
+  for (int phase = 0; phase <= 13; phase++) {
     bool header = false;
     for (size_t i = 0; i < N_CASES; i++) {
       if (CASES[i].phase != phase || !selected(&CASES[i], only)) continue;
@@ -4514,14 +4912,14 @@ int main(int argc, char **argv) {
     }
   }
   if (ran == 0) {
-    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10 a", only);
+    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13 a", only);
     for (size_t i = 0; i < N_CASES; i++) printf(" %s", CASES[i].name);
     printf("\n");
     return 2;
   }
 
   printf("== Výsledek: OK %d, chyby %d", total_ok, total_bad);
-  for (int phase = 0; phase <= 10; phase++)
+  for (int phase = 0; phase <= 13; phase++)
     if (phase_ok[phase] + phase_bad[phase] > 0)
       printf("   (fáze %d: %d/%d)", phase, phase_ok[phase], phase_ok[phase] + phase_bad[phase]);
   printf("\n");

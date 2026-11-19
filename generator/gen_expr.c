@@ -39,6 +39,7 @@ void literal(Gen *gen, AST_NODE *node, char* func_name) {
       printf("string@()");
       break;
     default:
+      error(ErrorInternal);
       exit(99);
   }
   printf("\n");
