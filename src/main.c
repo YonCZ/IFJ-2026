@@ -1,22 +1,26 @@
 /*
- * IFJ26 Compiler Implementation
- * 
- * File: main.c
- * Authors:
- *   Polina Tishaninova (xtishap00) - Leader
- *   Tadeáš Přikryl (xprikrt00)
- *   Pavel Novák (xnovakp01)
- *   Lucie Alexandrová (xalexal00)
+ * IFJ Implementace prekladace
+ * Soubor: main.c
+ * Autor: Polina Tihaninova [xtishap00]
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "scanner/scanner.h"
-#include "parser/parser.h"
-#include "symtable/symtable.h"
-#include "generator/generator.h"
+#include "error.h"
+#include "scanner.h"
+#include "parser.h"
+#include "ast.h"
+#include "generator.h"
 
 int main(void) {
-    printf("IFJ26 Compiler Initialized\n");
+    AST_NODE *root = parse_program();
+    if (root == NULL) {
+        scanner_free();
+        return ERROR_INTERNAL;
+    }
+    
+    Gen gen = {0};
+    generator_init(&gen, root);
+
+    free_AST(root);
+    scanner_free();
     return 0;
 }
