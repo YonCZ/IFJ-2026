@@ -26,11 +26,9 @@ typedef struct {
 int new_label(Gen *gen);
 
 
-void emit(Gen *gen, char *label);
-
-
 void emit_string_literal(Gen *gem, char *str);
 
+void lower_members(AST_NODE *root);
 
 void push_to_val(AST_NODE *node);
 void pop_to_val(AST_NODE *node);

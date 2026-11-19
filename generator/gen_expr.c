@@ -9,16 +9,12 @@
 
 #include <iso646.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "ast.h"
 #include "gen_internal.h"
 #include "generator.h"
 #include "../scanner/error.h"
-//===========================
-// puts one value on stack
-//===========================
 
 
 void literal(Gen *gen, AST_NODE *node, char* func_name) {
@@ -40,7 +36,7 @@ void literal(Gen *gen, AST_NODE *node, char* func_name) {
       printf("string@()");
       break;
     default:
-      error_exit(ERROR_INTERNAL,node->line, "Literal write" );
+      error_exit(ERROR_INTERNAL,node->line, 0 );
   }
   printf("\n");
 }
@@ -212,6 +208,31 @@ void gen_expr(Gen *gen, AST_NODE *node) {
         default:
           break;
       }
+      break;
+
+    case NODE_INTERP:
+      printf("PUSHS string@\n");
+      for (AST_NODE *n = node->left; n; n=n->next) {
+        gen_expr(gen, n);
+        switch (n->data_type) {
+          case DATA_INT:
+            printf("CALL $b_toStr_int\n");
+            break;
+          case DATA_DOUBLE:
+            printf("CALL $b_toStr_float\n");
+            break;
+          case DATA_BOOL:
+            printf("CALL $b_toStr_bool\n");
+            break;
+          default:
+            break;
+        }
+        printf("POPS LF@tmp1\n");
+        printf("POPS LF@tmp2\n");
+        printf("CONCAT LF@tmp3 LF@tmp2 LF@tmp1\n");
+        printf("PUSHS LF@tmp3\n");
+      }
+
       break;
 
     case NODE_IF: {

@@ -92,6 +92,25 @@ static void scan(AST_NODE *node) {
       }
     }
   }
+
+
+  if (node->type == NODE_INTERP) {
+    for (AST_NODE *part = node->left; part; part = part->next) {
+      switch (part->data_type) {
+        case DATA_INT:
+          used_tostr_int = true;
+          break;
+        case DATA_DOUBLE:
+          used_tostr_float = true;
+          break;
+        case DATA_BOOL:
+          used_tostr_bool = true;
+          break;
+        default:
+          break;
+      }
+    }
+  }
   scan(node->left);
   scan(node->right);
   scan(node->third);
@@ -119,6 +138,7 @@ void emit_builtin_call(Gen *gen, AST_NODE *call) {
       default:
         break; /* String zůstává na zásobníku, jak je */
     }
+    
     return;
   }
   printf("CALL $b_%s\n", call->name);

@@ -10,14 +10,14 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <scanner/error.h>
+#include <stdio.h>
 
-static char *ast_strdup(const char *ptr, AST_NODE *node) {
+static char *ast_strdup(const char *ptr) {
   if (!ptr) return NULL;
   size_t len = strlen(ptr);
   char *s = malloc(len + 1);
   if (s == NULL) {
-    error_exit(ERROR_INTERNAL,node->line, "error allocating memory");
+    exit(99);
   }
   memcpy(s, ptr, len);
   s[len] = '\0';
@@ -40,7 +40,7 @@ AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE t
 }
 
 void ast_name(AST_NODE *node, char *name) {
-  node->name = ast_strdup(name,node);
+  node->name = ast_strdup(name);
 }
 
 
@@ -60,7 +60,7 @@ AST_NODE * ast_double_literal_create(double value,AST_NODE *next) {
 }
 AST_NODE * ast_string_literal_create(char *value,AST_NODE *next) {
   AST_NODE *node = ast_create(NULL,NULL, next, NODE_LITERAL);
-  node->sval = ast_strdup(value,node);
+  node->sval = ast_strdup(value);
   node->data_type = DATA_STRING;
   return node;
 }
@@ -206,14 +206,62 @@ AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, 
 
 AST_NODE *ast_create_params_list_of_list(AST_NODE *next_param_list, int list_cnt) {
   AST_NODE *node = ast_create(NULL, NULL, next_param_list, NODE_LIST_OF_LIST);
-  node->list_no = list_cnt;
+  node->param_groups = list_cnt;
   return node;
 }
 
 AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt) {
   AST_NODE *node = ast_create(params,NULL, next, NODE_PARAM_LIST);
-  node->list_more_lists = param_cnt;
+  node->param_cnt = param_cnt;
   return node;
+}
+
+AST_NODE *ast_type_ref_create(DATA_TYPE base, char *name, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL, NULL, next, NODE_TYPE_REF);
+  node->data_type = base;
+  if (name != NULL) {
+    ast_name(node, name);
+  }
+  return node;
+}
+
+AST_NODE *ast_list_type_ref_create(AST_NODE *elem, AST_NODE *next) {
+  AST_NODE *node = ast_create(elem, NULL, next, NODE_TYPE_REF);
+  node->data_type = DATA_LIST;
+  return node;
+}
+
+AST_NODE *ast_union_type_ref_create(AST_NODE *left, AST_NODE *right, AST_NODE *next) {
+  AST_NODE *node = ast_create(left, right, next, NODE_TYPE_REF);
+  node->data_type = DATA_UNION;
+  return node;
+}
+
+AST_NODE *ast_type_def_create(char *name, AST_NODE *type, AST_NODE *next) {
+  AST_NODE *node = ast_create(type, NULL, next, NODE_TYPE_DEF);
+  ast_name(node, name);
+  return node;
+}
+
+AST_NODE *ast_case_class_create(char *name, AST_NODE *params, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL, NULL, next, NODE_CASE_CLASS);
+  node->third = params;
+  ast_name(node, name);
+  return node;
+}
+
+AST_NODE *ast_match_create(AST_NODE *subject, AST_NODE *cases, AST_NODE *next) {
+  return ast_create(subject, cases, next, NODE_MATCH);
+}
+
+AST_NODE *ast_case_create(AST_NODE *pattern, AST_NODE *guard, AST_NODE *body, AST_NODE *next) {
+  AST_NODE *node = ast_create(pattern, guard, next, NODE_CASE);
+  node->third = body;
+  return node;
+}
+
+AST_NODE *ast_wildcard_create(AST_NODE *next) {
+  return ast_create(NULL, NULL, next, NODE_WILDCARD);
 }
 
 AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next) {
@@ -234,9 +282,281 @@ void free_AST(AST_NODE *node) {
   free_AST(node->right);
   free_AST(node->next);
   free_AST(node->third);
+  free_AST(node->type_ref);
   free(node->name);
   free(node->sval);
   free(node);
 }
 
 
+//TODO VYMAZAT AI SNOB
+
+
+/* ---------------------------------------------------------------- nazvy */
+
+static const char *data_type_name(DATA_TYPE t) {
+  switch (t) {
+    case DATA_INT:    return "Int";
+    case DATA_DOUBLE: return "Double";
+    case DATA_STRING: return "String";
+    case DATA_BOOL:   return "Bool";
+    case DATA_UNIT:   return "Unit";
+    case DATA_LIST:   return "List";
+    case DATA_UNION:  return "Union";
+    default:          return "?";
+  }
+}
+
+static const char *op_name(OP_TYPE op) {
+  switch (op) {
+    case OP_ADD: return "+";
+    case OP_SUB: return "-";
+    case OP_MUL: return "*";
+    case OP_DIV: return "/";
+    case OP_GT:  return ">";
+    case OP_LT:  return "<";
+    case OP_GE:  return ">=";
+    case OP_LE:  return "<=";
+    case OP_EQ:  return "==";
+    case OP_NEQ: return "!=";
+    case OP_AND: return "&&";
+    case OP_OR:  return "||";
+    case OP_NOT: return "!";
+    case OP_TO:  return "to";
+    case OP_UNTIL: return "until";
+    case OP_BY:  return "by";
+    default:     return "?op";
+  }
+}
+
+static const char *type_name(NODE_TYPE t) {
+  switch (t) {
+    case NODE_NONE:         return "NONE";
+    case NODE_PROGRAM:      return "PROGRAM";
+    case NODE_FUNC_DEF:     return "FUNC_DEF";
+    case NODE_PARAM:        return "PARAM";
+    case NODE_BLOCK:        return "BLOCK";
+    case NODE_VAR_DEF:      return "VAR_DEF";
+    case NODE_ASSIGN:       return "ASSIGN";
+    case NODE_IF:           return "IF";
+    case NODE_WHILE:        return "WHILE";
+    case NODE_RETURN:       return "RETURN";
+    case NODE_CALL:         return "CALL";
+    case NODE_EXPR_STMT:    return "EXPR_STMT";
+    case NODE_BINOP:        return "BINOP";
+    case NODE_UNOP:         return "UNOP";
+    case NODE_IDENT:        return "IDENT";
+    case NODE_LITERAL:      return "LITERAL";
+    case NODE_FOR:          return "FOR";
+    case NODE_RANGE:        return "RANGE";
+    case NODE_INTERP:       return "INTERP";
+    case NODE_LIST_OF_LIST: return "LIST_OF_LIST";
+    case NODE_PARAM_LIST:   return "PARAM_LIST";
+    case NODE_MATCH:        return "MATCH";
+    case NODE_CASE:         return "CASE";
+    case NODE_WILDCARD:     return "WILDCARD";
+    case NODE_TYPE_DEF:     return "TYPE_DEF";
+    case NODE_CASE_CLASS:   return "CASE_CLASS";
+    case NODE_TYPE_REF:     return "TYPE_REF";
+    default:                return "BUILTIN?";
+  }
+}
+
+/* Popisky deti: ktery ukazatel (left/right/third) znamena co, podle typu uzlu. */
+static const char *slot_label(const AST_NODE *n, int slot) {
+  /* slot: 0 = left, 1 = right, 2 = third */
+  static const char *def[3] = {"left", "right", "third"};
+  const char *l[3] = {def[0], def[1], def[2]};
+
+  switch (n->type) {
+    case NODE_PROGRAM:    l[0] = "functions"; break;
+    case NODE_FUNC_DEF:   l[0] = "body"; l[2] = "params"; break;
+    case NODE_VAR_DEF:    l[0] = "init"; break;
+    case NODE_ASSIGN:     l[0] = "var"; l[1] = "value"; break;
+    case NODE_IF:         l[0] = "cond"; l[1] = "then"; l[2] = "else"; break;
+    case NODE_WHILE:      l[0] = "cond"; l[1] = "body"; break;
+    case NODE_RETURN:     l[0] = "value"; break;
+    case NODE_CALL:       l[0] = "receiver"; l[2] = "args"; break;
+    case NODE_EXPR_STMT:  l[0] = "expr"; l[2] = "params"; break;
+    case NODE_UNOP:       l[0] = "operand"; break;
+    case NODE_FOR:        l[0] = "range"; l[1] = "body"; l[2] = "guards"; break;
+    case NODE_RANGE:      l[0] = "from"; l[1] = "to"; l[2] = "step"; break;
+    case NODE_INTERP:     l[0] = "part"; break;
+    case NODE_PARAM_LIST: l[0] = "params"; break;
+    case NODE_BLOCK:      l[0] = "stmts"; break;
+    default: break;
+  }
+  return l[slot];
+}
+
+/* ------------------------------------------------------------- jeden uzel */
+
+static void print_string_value(FILE *out, const char *s) {
+  fputc('"', out);
+  for (; s && *s; s++) {
+    switch (*s) {
+      case '\n': fputs("\\n", out); break;
+      case '\t': fputs("\\t", out); break;
+      case '\r': fputs("\\r", out); break;
+      case '"':  fputs("\\\"", out); break;
+      case '\\': fputs("\\\\", out); break;
+      default:   fputc(*s, out);
+    }
+  }
+  fputc('"', out);
+}
+
+/* Popis uzlu na jeden radek (bez odradkovani). */
+static void print_node_text(FILE *out, const AST_NODE *n) {
+  switch (n->type) {
+    case NODE_FUNC_DEF:
+      fprintf(out, "FUNC_DEF %s%s -> %s", n->name ? n->name : "?",
+              n->is_main ? " [@main]" : "", data_type_name(n->data_type));
+      break;
+    case NODE_PARAM:
+      fprintf(out, "PARAM %s : %s", n->name ? n->name : "?", data_type_name(n->data_type));
+      break;
+    case NODE_VAR_DEF:
+      fprintf(out, "VAR_DEF %s %s$%d : %s", n->is_const ? "val" : "var",
+              n->name ? n->name : "?", n->id, data_type_name(n->data_type));
+      break;
+    case NODE_IDENT:
+      fprintf(out, "IDENT %s$%d", n->name ? n->name : "?", n->id);
+      if (n->data_type != DATA_NONE) fprintf(out, " : %s", data_type_name(n->data_type));
+      break;
+    case NODE_LITERAL:
+      fprintf(out, "LITERAL %s ", data_type_name(n->data_type));
+      switch (n->data_type) {
+        case DATA_INT:    fprintf(out, "%lld", n->ival); break;
+        case DATA_DOUBLE: fprintf(out, "%g", n->dval); break;
+        case DATA_STRING: print_string_value(out, n->sval); break;
+        case DATA_BOOL:   fputs(n->ival ? "true" : "false", out); break;
+        case DATA_UNIT:   fputs("()", out); break;
+        default:          fputs("?", out);
+      }
+      break;
+    case NODE_BINOP:
+    case NODE_UNOP:
+      fprintf(out, "%s %s", type_name(n->type), op_name(n->op_type));
+      if (n->data_type != DATA_NONE) fprintf(out, " : %s", data_type_name(n->data_type));
+      break;
+    case NODE_CALL:
+      fprintf(out, "CALL %s%s", n->name ? n->name : "?", n->is_method ? " (metoda)" : "");
+      if (n->data_type != DATA_NONE) fprintf(out, " : %s", data_type_name(n->data_type));
+      break;
+    case NODE_RANGE:
+      fprintf(out, "RANGE %s", n->inclusive ? "(vcetne konce)" : "(bez konce)");
+      break;
+    case NODE_FOR:
+      fprintf(out, "FOR %s", n->name ? n->name : "?");
+      break;
+    case NODE_EXPR_STMT:
+      fputs("EXPR_STMT", out);
+      if (n->name) fprintf(out, " %s", n->name);
+      break;
+    default:
+      fputs(type_name(n->type), out);
+  }
+}
+
+/* --------------------------------------------------------------- strom */
+
+/* spoji prefix a pokracovani, vysledek je treba uvolnit */
+static char *join(const char *a, const char *b) {
+  char *r = malloc(strlen(a) + strlen(b) + 1);
+  if (!r) exit(99);
+  strcpy(r, a);
+  strcat(r, b);
+  return r;
+}
+
+static void print_node(FILE *out, const AST_NODE *n, const char *prefix, bool last, const char *label);
+
+/* Jedna pozice (left/right/third): bud jeden uzel, nebo cely retez pres next. */
+static void print_slot(FILE *out, const AST_NODE *s, const char *label, const char *prefix, bool last) {
+  if (!s->next) {
+    print_node(out, s, prefix, last, label);
+    return;
+  }
+  fprintf(out, "%s%s%s:\n", prefix, last ? "└── " : "├── ", label);
+  char *inner = join(prefix, last ? "    " : "│   ");
+  for (const AST_NODE *c = s; c; c = c->next) {
+    print_node(out, c, inner, c->next == NULL, NULL);
+  }
+  free(inner);
+}
+
+/* Uzel + jeho deti. label je popisek pozice, ve ktere uzel stoji (nebo NULL). */
+static void print_node(FILE *out, const AST_NODE *n, const char *prefix, bool last, const char *label) {
+  fprintf(out, "%s%s", prefix, last ? "└── " : "├── ");
+  if (label) fprintf(out, "%s: ", label);
+  print_node_text(out, n);
+  fputc('\n', out);
+
+  const AST_NODE *slots[3] = {n->left, n->right, n->third};
+  int count = 0, lastslot = -1;
+  for (int i = 0; i < 3; i++) {
+    if (slots[i]) {
+      count++;
+      lastslot = i;
+    }
+  }
+  if (count == 0) return;
+
+  char *child_prefix = join(prefix, last ? "    " : "│   ");
+  for (int i = 0; i < 3; i++) {
+    if (slots[i]) {
+      print_slot(out, slots[i], slot_label(n, i), child_prefix, i == lastslot);
+    }
+  }
+  free(child_prefix);
+}
+
+/* ------------------------------------------------------------ rozhrani */
+
+void ast_print(const AST_NODE *root) {
+  FILE *out = stderr;
+
+  if (!root) {
+    fputs("(prazdny AST)\n", out);
+    return;
+  }
+
+  /* koren: vypsat bez vetve, pak jeho deti; dalsi uzly pres next (kdyby jich bylo vic) */
+  for (const AST_NODE *n = root; n; n = n->next) {
+    print_node_text(out, n);
+    fputc('\n', out);
+
+    const AST_NODE *slots[3] = {n->left, n->right, n->third};
+    int lastslot = -1;
+    for (int i = 0; i < 3; i++) {
+      if (slots[i]) lastslot = i;
+    }
+    for (int i = 0; i < 3; i++) {
+      if (slots[i]) print_slot(out, slots[i], slot_label(n, i), "", i == lastslot);
+    }
+  }
+}
+
+/* Vypise jen jeden uzel na jeden radek (bez deti a bez next).
+ * V zavorce je videt, ktere ukazatele jsou vyplnene, napr. VAR_DEF var x$1 : Int  [left, next] */
+void ast_print_node(const AST_NODE *node) {
+  if (!node) {
+    fputs("(NULL)\n", stderr);
+    return;
+  }
+  print_node_text(stderr, node);
+
+  const char *names[5] = {"left", "right", "third", "next", "type"};
+  const AST_NODE *ptrs[5] = {node->left, node->right, node->third, node->next,
+                             node->type_ref};
+  const char *sep = "  [";
+  for (int i = 0; i < 5; i++) {
+    if (ptrs[i]) {
+      fprintf(stderr, "%s%s", sep, names[i]);
+      sep = ", ";
+    }
+  }
+  if (sep[0] == ',') fputc(']', stderr);
+  fputc('\n', stderr);
+}
