@@ -28,6 +28,9 @@ static int    ntokens;
 // Cursor of the parser, index into tokens.
 static int pos;
 
+// Unique id of every declaration in the program.
+static int next_id;
+
 // Loads all tokens from f into the array, including EOF.
 static void load_tokens(FILE *f) {
     int cap = 128;
@@ -56,6 +59,14 @@ static void load_tokens(FILE *f) {
 // Returns the current token without consuming it.
 Token parser_peek(void) {
     return tokens[pos];
+}
+
+// Returns the token after the current one, EOF at the end.
+Token parser_peek_next(void) {
+    if (pos + 1 >= ntokens) {
+        return tokens[ntokens - 1];
+    }
+    return tokens[pos + 1];
 }
 
 Token parser_advance(void) {
@@ -122,142 +133,170 @@ static void chain_append(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
     *tail = node;
 }
 
-static DATA_TYPE parse_type(void);
+static AST_NODE *parse_type_ref(void);
 
 // TypeAtom → basic token, List[T] or ID (alias / case class).
-static DATA_TYPE parse_type_atom(void) {
+static AST_NODE *parse_type_atom_ref(void) {
     Token t = parser_advance();
     switch (t.type) {
-        case INT_TOKEN:     return DATA_INT;
-        case DOUBLE_TOKEN:  return DATA_DOUBLE;
-        case STRING_TOKEN:  return DATA_STRING;
-        case UNIT_TOKEN:    return DATA_UNIT;
-        case BOOLEAN_TOKEN: return DATA_BOOL;
-        case LIST_TOKEN:
+        case INT_TOKEN:
+            return ast_type_ref_create(DATA_INT, NULL, NULL);
+        case DOUBLE_TOKEN:
+            return ast_type_ref_create(DATA_DOUBLE, NULL, NULL);
+        case STRING_TOKEN:
+            return ast_type_ref_create(DATA_STRING, NULL, NULL);
+        case UNIT_TOKEN:
+            return ast_type_ref_create(DATA_UNIT, NULL, NULL);
+        case BOOLEAN_TOKEN:
+            return ast_type_ref_create(DATA_BOOL, NULL, NULL);
+        case LIST_TOKEN: {
             parser_expect(LBRACKET_TOKEN);
-            parse_type();
+            AST_NODE *elem = parse_type_ref();
             parser_expect(RBRACKET_TOKEN);
-            return DATA_NONE;
+            return ast_list_type_ref_create(elem, NULL);
+        }
         case IDENTIFIER_TOKEN:
-            return DATA_NONE;
+            return ast_type_ref_create(DATA_NONE, t.atribute, NULL);
         default:
             error_exit(ERROR_SYN, t.line, "syntax error");
-            return DATA_NONE;
+            return NULL;
     }
 }
 
-// Type → TypeAtom TypeUnionRest, union returns DATA_NONE.
-static DATA_TYPE parse_type(void) {
-    DATA_TYPE result = parse_type_atom();
+// Type → TypeAtom (| TypeAtom)*
+static AST_NODE *parse_type_ref(void) {
+    AST_NODE *type = parse_type_atom_ref();
     while (parser_peek().type == PIPE_TOKEN) {
         parser_advance();
-        parse_type_atom();
-        result = DATA_NONE;
+        AST_NODE *right = parse_type_atom_ref();
+        type = ast_union_type_ref_create(type, right, NULL);
     }
-    return result;
+    return type;
 }
 
-// Param → ID COLON Type, group is the index of its parameter list
-static AST_NODE *parse_param(int group) {
+// Basic type of a simple type reference, DATA_NONE for List and unions.
+static DATA_TYPE type_ref_basic(AST_NODE *type) {
+    if (type == NULL || type->data_type == DATA_LIST || type->data_type == DATA_UNION) {
+        return DATA_NONE;
+    }
+    return type->data_type;
+}
+
+// Param → ID COLON Type
+static AST_NODE *parse_param(void) {
     Token id = parser_expect(IDENTIFIER_TOKEN);
     parser_expect(COLON_TOKEN);
-    AST_NODE *node = ast_param_create(parse_type(), id.atribute, NULL);
-    node->list_no = group;
+    AST_NODE *type = parse_type_ref();
+    AST_NODE *node = ast_param_create(type_ref_basic(type), id.atribute, NULL);
+    node->type_ref = type;
+    node->id = next_id++;
     node->line = id.line;
     return node;
 }
 
-static void parse_param_rest(AST_NODE **head, AST_NODE **tail, int group);
+static int parse_param_rest(AST_NODE **head, AST_NODE **tail);
 
 // AfterCommaParam → Param ParamRest | ε
 // The ε branch is the trailing comma
-static void parse_after_comma_param(AST_NODE **head, AST_NODE **tail, int group) {
+static int parse_after_comma_param(AST_NODE **head, AST_NODE **tail) {
     Token t = parser_peek();
     if (t.type == IDENTIFIER_TOKEN) {
-        chain_append(head, tail, parse_param(group));
-        parse_param_rest(head, tail, group);
-        return;
+        chain_append(head, tail, parse_param());
+        return 1 + parse_param_rest(head, tail);
     }
     if (t.type == RPAR_TOKEN) {
         if (!t.check_new_line) {
             error_exit(ERROR_SYN, t.line, "trailing comma without end of line");
         }
-        return;
+        return 0;
     }
     error_exit(ERROR_SYN, t.line, "syntax error");
+    return 0;
 }
 
 // ParamRest → COMMA AfterCommaParam | ε
-static void parse_param_rest(AST_NODE **head, AST_NODE **tail, int group) {
+static int parse_param_rest(AST_NODE **head, AST_NODE **tail) {
     Token t = parser_peek();
     if (t.type == COMMA_TOKEN) {
         parser_advance();
-        parse_after_comma_param(head, tail, group);
-        return;
+        return parse_after_comma_param(head, tail);
     }
     if (t.type == RPAR_TOKEN) {
-        return;
+        return 0;
     }
     error_exit(ERROR_SYN, t.line, "syntax error");
+    return 0;
 }
 
-// ParamList → Param ParamRest | ε
-static void parse_param_list(AST_NODE **head, AST_NODE **tail, int group) {
+// ParamList → Param ParamRest | ε, returns the number of parameters.
+static int parse_param_list(AST_NODE **head, AST_NODE **tail) {
     if (parser_peek().type == RPAR_TOKEN) {
-        return; // empty group ()
+        return 0; // empty group ()
     }
-    chain_append(head, tail, parse_param(group));
-    parse_param_rest(head, tail, group);
+    chain_append(head, tail, parse_param());
+    return 1 + parse_param_rest(head, tail);
 }
 
 // Params → ParamGroup Params | ε, one or more () groups.
-// Returns true when the head had parentheses, groups is their count.
-static bool parse_params(AST_NODE **head, int *groups) {
-    AST_NODE *tail = NULL;
-    *groups = 0;
+// Returns true when the head had parentheses.
+static bool parse_params(AST_NODE **head) {
+    *head = NULL;
     if (parser_peek().type != LPAR_TOKEN) {
         return false; // no parentheses at all
     }
-    int group = 0;
+    AST_NODE *groups_head = NULL;
+    AST_NODE *groups_tail = NULL;
+    int count = 0;
     do {
         parser_advance(); // (
-        parse_param_list(head, &tail, group++);
+        AST_NODE *params = NULL;
+        AST_NODE *tail = NULL;
+        int cnt = parse_param_list(&params, &tail);
+        AST_NODE *group = ast_create_param_list(params, NULL, cnt);
+        chain_append(&groups_head, &groups_tail, group);
+        count++;
         parser_expect(RPAR_TOKEN);
     } while (parser_peek().type == LPAR_TOKEN);
-    *groups = group;
+    *head = ast_create_params_list_of_list(groups_head, count);
     return true;
 }
 
 // TypeDef → TYPE ID ASSIGN Type EOL
-static void parse_type_def(void) {
+static AST_NODE *parse_type_def(void) {
     parser_advance();
-    parser_expect(IDENTIFIER_TOKEN);
+    Token id = parser_expect(IDENTIFIER_TOKEN);
     parser_expect(ASSIGN_TOKEN);
-    parse_type();
+    AST_NODE *type = parse_type_ref();
     parser_expect(EOL_TOKEN);
+    AST_NODE *node = ast_type_def_create(id.atribute, type, NULL);
+    node->line = id.line;
+    return node;
 }
 
 // CaseClassDef → CASE CLASS ID LPAREN ParamList RPAREN EOL
-static void parse_case_class(void) {
-    parser_advance();
+static AST_NODE *parse_case_class(void) {
+    Token kw = parser_advance();
     parser_expect(CLASS_TOKEN);
-    parser_expect(IDENTIFIER_TOKEN);
+    Token id = parser_expect(IDENTIFIER_TOKEN);
     parser_expect(LPAR_TOKEN);
     AST_NODE *head = NULL;
     AST_NODE *tail = NULL;
-    parse_param_list(&head, &tail, 0);
-    free_AST(head);
+    int count = parse_param_list(&head, &tail);
+    AST_NODE *params = ast_create_param_list(head, NULL, count);
     parser_expect(RPAR_TOKEN);
     parser_expect(EOL_TOKEN);
+    AST_NODE *node = ast_case_class_create(id.atribute, params, NULL);
+    node->line = kw.line;
+    return node;
 }
 
 // RetType → COLON Type | ε
-static DATA_TYPE parse_ret_type(void) {
+static AST_NODE *parse_ret_type(void) {
     if (parser_peek().type == COLON_TOKEN) {
         parser_advance();
-        return parse_type();
+        return parse_type_ref();
     }
-    return DATA_NONE;
+    return NULL;
 }
 
 // OptEol → EOL | ε
@@ -341,7 +380,7 @@ static void parse_pattern(void) {
             Token next = parser_peek();
             if (next.type == COLON_TOKEN) { // n: Int
                 parser_advance();
-                parse_type_atom();
+                free_AST(parse_type_atom_ref());
             } else if (next.type == LPAR_TOKEN) { // Point(x, y)
                 parser_advance();
                 if (parser_peek().type != RPAR_TOKEN) {
@@ -507,21 +546,18 @@ static void check_range_shape(int start);
 // still go through skip_expression.
 static bool precedence_can_parse(void) {
     int depth = 0;
-    bool prev_operand = false;
+    bool call_chain = false;
+    Tokens prev = EOF_TOKEN;
     for (int i = pos; i < ntokens; i++) {
         Tokens t = tokens[i].type;
-        if (t == LPAR_TOKEN && prev_operand) {
-            return false; // call
+        if (t == LPAR_TOKEN && prev == IDENTIFIER_TOKEN) {
+            call_chain = true;
         }
-        if (t == LPAR_TOKEN && i + 1 < ntokens && tokens[i + 1].type == RPAR_TOKEN) {
-            return false; // unit literal ()
+        if (t == LPAR_TOKEN && prev == RPAR_TOKEN && call_chain) {
+            return false; // chained parameter groups
         }
-        if (t == DOT_TOKEN || t == INTERP_START_TOKEN || t == MATCH_TOKEN ||
-            t == IF_TOKEN || t == ASSIGN_TOKEN) {
+        if (t == MATCH_TOKEN || t == IF_TOKEN || t == ASSIGN_TOKEN) {
             return false;
-        }
-        if (t == IDENTIFIER_TOKEN && is_range_word(tokens[i])) {
-            return false; // to, until, by
         }
         if (depth == 0 &&
             (t == EOL_TOKEN || t == SEMICOLON_TOKEN || t == THEN_TOKEN ||
@@ -535,16 +571,51 @@ static bool precedence_can_parse(void) {
         } else if (t == RPAR_TOKEN) {
             depth--;
         }
-        prev_operand = t == IDENTIFIER_TOKEN || t == INT_NUM_TOKEN ||
-                       t == DOUBLE_NUM_TOKEN || t == STRING_WORD_TOKEN ||
-                       t == TRUE_TOKEN || t == FALSE_TOKEN ||
-                       t == UNIT_LIT_TOKEN || t == RPAR_TOKEN;
+        prev = t;
     }
     return true;
 }
 
+static AST_NODE *parse_rhs(void);
+static AST_NODE *wrap_expr_stmt(AST_NODE *expr);
+
+static AST_NODE *parse_if_expr(void) {
+    Token kw = parser_advance();
+    AST_NODE *cond = parse_rhs();
+    parser_expect(THEN_TOKEN);
+    AST_NODE *then_branch;
+    if (parser_peek().type == EOL_TOKEN) {
+        parser_advance();
+        parser_expect(INDENT_TOKEN);
+        then_branch = parse_block();
+        parser_expect(DEDENT_TOKEN);
+    } else {
+        then_branch = wrap_expr_stmt(parse_rhs());
+    }
+    AST_NODE *else_branch = NULL;
+    if (parser_peek().type == ELSE_TOKEN) {
+        parser_advance();
+        if (parser_peek().type == EOL_TOKEN) {
+            parser_advance();
+            parser_expect(INDENT_TOKEN);
+            else_branch = parse_block();
+            parser_expect(DEDENT_TOKEN);
+        } else if (parser_peek().type == IF_TOKEN) {
+            else_branch = parse_if_expr();
+        } else {
+            else_branch = wrap_expr_stmt(parse_rhs());
+        }
+    }
+    AST_NODE *node = ast_if_create(cond, then_branch, else_branch, NULL);
+    node->line = kw.line;
+    return node;
+}
+
 static AST_NODE *parse_rhs(void) {
     Token t = parser_peek();
+    if (t.type == IF_TOKEN) {
+        return parse_if_expr();
+    }
     if (t.type == INTERP_START_TOKEN) {
         AST_NODE *node = parse_interp();
         skip_expression(); // postfix on the interp result (match, .člen)
@@ -699,6 +770,10 @@ static AST_NODE *parse_interp(void) {
     }
 }
 
+AST_NODE *parser_parse_interp(void) {
+    return parse_interp();
+}
+
 static void parse_mid_item(AST_NODE **head, AST_NODE **tail);
 static void parse_if_stmt(AST_NODE **head, AST_NODE **tail);
 static void parse_while_stmt(AST_NODE **head, AST_NODE **tail);
@@ -741,13 +816,17 @@ static AST_NODE *parse_stmt_id_tail(Token id) {
 
 // ValVarTail → COLON Type ASSIGN Rhs | ASSIGN Rhs
 static AST_NODE *parse_val_var_tail(char *name, bool is_const, int line) {
+    AST_NODE *declared_type = NULL;
     DATA_TYPE declared = DATA_NONE;
     if (parser_peek().type == COLON_TOKEN) {
         parser_advance();
-        declared = parse_type();
+        declared_type = parse_type_ref();
+        declared = type_ref_basic(declared_type);
     }
     parser_expect(ASSIGN_TOKEN);
     AST_NODE *node = ast_var_def_create(parse_rhs(), NULL, name, is_const, declared);
+    node->type_ref = declared_type;
+    node->id = next_id++;
     node->line = line;
     return node;
 }
@@ -781,6 +860,16 @@ static AST_NODE *parse_return_stmt(void) {
 }
 
 // SimpleStmt → ValStmt | VarStmt | ReturnStmt | ID StmtIdTail | ExprStmt
+// Wraps an expression into an expression statement.
+static AST_NODE *wrap_expr_stmt(AST_NODE *expr) {
+    if (expr == NULL) {
+        return NULL;
+    }
+    AST_NODE *stmt = ast_create(expr, NULL, NULL, NODE_EXPR_STMT);
+    stmt->line = expr->line;
+    return stmt;
+}
+
 static AST_NODE *parse_simple_stmt(void) {
     switch (parser_peek().type) {
         case VAL_TOKEN:
@@ -790,11 +879,14 @@ static AST_NODE *parse_simple_stmt(void) {
         case RETURN_TOKEN:
             return parse_return_stmt();
         case IDENTIFIER_TOKEN: {
-            Token id = parser_advance();
-            return parse_stmt_id_tail(id);
+            if (pos + 1 < ntokens && tokens[pos + 1].type == ASSIGN_TOKEN) {
+                Token id = parser_advance();
+                return parse_stmt_id_tail(id);
+            }
+            return wrap_expr_stmt(parse_rhs());
         }
         default:
-            return parse_rhs();
+            return wrap_expr_stmt(parse_rhs());
     }
 }
 
@@ -850,7 +942,7 @@ static AST_NODE *parse_if_else(AST_NODE **head, AST_NODE **tail) {
     if (parser_peek().type == IF_TOKEN) {
         return parse_if_branch(head, tail); // else if chain
     }
-    AST_NODE *value = parse_rhs();
+    AST_NODE *value = wrap_expr_stmt(parse_rhs());
     parse_line_end(head, tail);
     return value;
 }
@@ -879,7 +971,7 @@ static void parse_if_then(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
         }
         return;
     }
-    node->right = parse_rhs();
+    node->right = wrap_expr_stmt(parse_rhs());
     if (parser_peek().type == ELSE_TOKEN) {
         parser_advance();
         node->third = parse_if_else(head, tail);
@@ -947,8 +1039,43 @@ static void parse_do_body(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
         parser_expect(DEDENT_TOKEN);
         return;
     }
-    node->right = parse_rhs();
+    node->right = wrap_expr_stmt(parse_rhs());
     parse_line_end(head, tail);
+}
+
+// Converts a range expression (a to b [by c]) into NODE_RANGE.
+static AST_NODE *make_range(AST_NODE *expr) {
+    if (expr == NULL || expr->type != NODE_BINOP) {
+        return expr;
+    }
+    AST_NODE *step = NULL;
+    AST_NODE *range = expr;
+    if (expr->op_type == OP_BY) {
+        step = expr->right;
+        range = expr->left;
+        if (range == NULL || range->type != NODE_BINOP) {
+            return expr;
+        }
+    }
+    bool inclusive;
+    if (range->op_type == OP_TO) {
+        inclusive = true;
+    } else if (range->op_type == OP_UNTIL) {
+        inclusive = false;
+    } else {
+        return expr;
+    }
+    AST_NODE *from = range->left;
+    AST_NODE *to = range->right;
+    range->left = NULL;
+    range->right = NULL;
+    if (step != NULL) {
+        expr->left = NULL;
+        expr->right = NULL;
+        free_AST(expr);
+    }
+    free_AST(range);
+    return ast_range_create(from, to, step, NULL, inclusive);
 }
 
 // ForStmt → FOR ForHead
@@ -956,6 +1083,7 @@ static void parse_do_body(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
 static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
     Token kw = parser_advance();
     AST_NODE *node = ast_for_create(NULL, NULL, NULL, NULL, NULL);
+    node->id = next_id++;
     node->line = kw.line;
     chain_append(head, tail, node);
     Token id;
@@ -965,7 +1093,7 @@ static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
         parser_expect(INDENT_TOKEN);
         id = parser_expect(IDENTIFIER_TOKEN); // ForGen: ID <- Expr EOL
         parser_expect(ARROW_LEFT_TOKEN);
-        node->left = parse_rhs();
+        node->left = make_range(parse_rhs());
         parser_expect(EOL_TOKEN);
         node->third = parse_guard_rest();
         parser_expect(DEDENT_TOKEN);
@@ -977,7 +1105,7 @@ static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
     // ForHead → ForGenInline DO DoBody
     id = parser_expect(IDENTIFIER_TOKEN);
     parser_expect(ARROW_LEFT_TOKEN);
-    node->left = parse_rhs();
+    node->left = make_range(parse_rhs());
     parser_expect(DO_TOKEN);
     ast_name(node, id.atribute);
     parse_do_body(head, tail, node);
@@ -1046,7 +1174,7 @@ static AST_NODE *parse_body(void) {
         parser_expect(DEDENT_TOKEN);
         return block;
     }
-    AST_NODE *rhs = parse_rhs();
+    AST_NODE *rhs = wrap_expr_stmt(parse_rhs());
     if (pos > 0 && tokens[pos - 1].type != DEDENT_TOKEN) {
         parser_expect(EOL_TOKEN);
     }
@@ -1071,14 +1199,14 @@ static AST_NODE *parse_func_def(void) {
     parser_expect(DEF_TOKEN);
     Token id = parser_expect(IDENTIFIER_TOKEN);
     AST_NODE *params = NULL;
-    int groups = 0;
-    bool has_parens = parse_params(&params, &groups);
-    DATA_TYPE ret = parse_ret_type();
+    bool has_parens = parse_params(&params);
+    AST_NODE *ret_type = parse_ret_type();
+    DATA_TYPE ret = type_ref_basic(ret_type);
     if (is_main) {
         if (params != NULL) {
             int count = 0;
-            for (AST_NODE *p = params; p != NULL; p = p->next) {
-                count++;
+            for (AST_NODE *g = params->next; g != NULL; g = g->next) {
+                count += g->param_cnt;
             }
             if (count > 0) {
                 error_exit(ERROR_SEM_ARG, id.line, "main must have no parameters");
@@ -1092,8 +1220,8 @@ static AST_NODE *parse_func_def(void) {
     AST_NODE *body = parse_body();
     AST_NODE *node = ast_func_def_create(body, params, NULL, ret, id.atribute,
                                          is_main, has_parens);
+    node->type_ref = ret_type;
     node->line = line;
-    node->list_more_lists = groups;
     return node;
 }
 
@@ -1102,7 +1230,7 @@ static AST_NODE *parse_func_def(void) {
 static void parse_extension_def(AST_NODE **head, AST_NODE **tail) {
     parser_advance();
     parser_expect(LPAR_TOKEN);
-    AST_NODE *receiver = parse_param(0);
+    AST_NODE *receiver = parse_param();
     parser_expect(RPAR_TOKEN);
     parser_expect(EOL_TOKEN);
     parser_expect(INDENT_TOKEN);
@@ -1117,10 +1245,18 @@ static void parse_extension_def(AST_NODE **head, AST_NODE **tail) {
             AST_NODE *method = parse_func_def();
             method->is_extension = true;
             AST_NODE *recv = ast_param_create(receiver->data_type,
-                                              receiver->name, method->third);
+                                              receiver->name, NULL);
             recv->is_method = true;
             recv->line = receiver->line;
-            method->third = recv;
+            AST_NODE *recv_group = ast_create_param_list(recv, NULL, 1);
+            if (method->third == NULL) {
+                method->third = ast_create_params_list_of_list(recv_group, 1);
+                method->third->line = receiver->line;
+            } else {
+                recv_group->next = method->third->next;
+                method->third->next = recv_group;
+                method->third->param_groups++;
+            }
             chain_append(head, tail, method);
             continue;
         }
@@ -1149,11 +1285,11 @@ static AST_NODE *parse_func_defs(void) {
             continue;
         }
         if (t.type == TYPE_TOKEN) {
-            parse_type_def();
+            chain_append(&head, &tail, parse_type_def());
             continue;
         }
         if (t.type == CASE_TOKEN) {
-            parse_case_class();
+            chain_append(&head, &tail, parse_case_class());
             continue;
         }
         if (t.type == EOF_TOKEN) {

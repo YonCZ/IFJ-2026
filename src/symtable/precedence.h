@@ -40,9 +40,13 @@ typedef enum {
     PSA_CONCAT,      // ++ (konkatenace seznamů)
     PSA_AND,         // &&
     PSA_OR,          // ||
-    PSA_TABLE_SIZE   // počet symbolů (20)
+    PSA_TO,          // to
+    PSA_UNTIL,       // until
+    PSA_BY,          // by
+    PSA_TABLE_SIZE   // počet symbolů (23)
 } PSASymbol;
 
 AST_NODE *precedence_parse(void);
+AST_NODE *precedence_parse_arg(void);
 
 #endif

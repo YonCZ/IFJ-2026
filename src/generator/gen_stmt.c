@@ -110,6 +110,8 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
 
 
 
+      printf("LT LF@tmp1 LF@for_step$%d int@0\n", node->id);
+      printf("JUMPIFEQ for$%d$NEG LF@tmp1 bool@true\n", node->id);
       if (range->inclusive) {
         printf("GT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
         printf("JUMPIFEQ for$%d$END LF@tmp1 bool@true\n", node->id);
@@ -118,6 +120,17 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
         printf("LT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
         printf("JUMPIFEQ for$%d$END LF@tmp1 bool@false\n", node->id);
       }
+      printf("JUMP for$%d$CHK\n", node->id);
+      printf("LABEL for$%d$NEG\n", node->id);
+      if (range->inclusive) {
+        printf("LT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
+        printf("JUMPIFEQ for$%d$END LF@tmp1 bool@true\n", node->id);
+      }
+      else {
+        printf("GT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
+        printf("JUMPIFEQ for$%d$END LF@tmp1 bool@false\n", node->id);
+      }
+      printf("LABEL for$%d$CHK\n", node->id);
 
       //guards
       for (AST_NODE *guard = node->third; guard != NULL; guard = guard->next) {

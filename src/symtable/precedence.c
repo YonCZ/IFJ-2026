@@ -35,29 +35,33 @@ for lists extension:
 #include "error.h"
 #include "parser/parser.h"
 #include <stdlib.h>
+#include <string.h>
 
 const PrecedenceRel PSA_TABLE[PSA_TABLE_SIZE][PSA_TABLE_SIZE] = {
-    //            u+      u-      u!      *       /       +       -       <       >       <=      >=      ==      !=      (       )       id      $       ++      &&      ||
-    /* u+  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* u-  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* u!  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* *   */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* /   */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* +   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* -   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* <   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* >   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* <=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* >=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* ==  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* !=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* (   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_EQ, REL_LT, REL_ERR,REL_LT, REL_LT, REL_LT },
-    /* )   */ { REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_ERR,REL_GT, REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT },
-    /* id  */ { REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT },
-    /* $   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_LT, REL_ERR,REL_LT, REL_LT, REL_LT },
-    /* ++  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
-    /* &&  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT },
-    /* ||  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_LT, REL_GT }
+    //            u+      u-      u!      *       /       +       -       <       >       <=      >=      ==      !=      (       )       id      $       ++      &&      ||      to      until   by
+    /* u+  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* u-  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* u!  */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* *   */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* /   */ { REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* +   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* -   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* <   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* >   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* <=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* >=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* ==  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* !=  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* (   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_EQ, REL_LT, REL_ERR,REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT },
+    /* )   */ { REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_ERR,REL_GT, REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* id  */ { REL_ERR,REL_ERR,REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_ERR,REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* $   */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_LT, REL_ERR,REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT },
+    /* ++  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* &&  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* ||  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_LT, REL_GT, REL_GT, REL_GT, REL_GT },
+    /* to  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_GT },
+    /*until*/ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR },
+    /* by  */ { REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_LT, REL_GT, REL_LT, REL_GT, REL_LT, REL_LT, REL_LT, REL_ERR,REL_ERR,REL_ERR },
 };
 static bool is_expression_end(Tokens type) {
     return type == SEMICOLON_TOKEN ||
@@ -91,12 +95,19 @@ static PSASymbol token_to_symbol(Token token, bool expecting_operand) {
         case AND_TOKEN: return PSA_AND;
         case OR_TOKEN: return PSA_OR;
         case IDENTIFIER_TOKEN:
+            if (!expecting_operand && token.atribute != NULL) {
+                if (strcmp(token.atribute, "to") == 0) return PSA_TO;
+                if (strcmp(token.atribute, "until") == 0) return PSA_UNTIL;
+                if (strcmp(token.atribute, "by") == 0) return PSA_BY;
+            }
+            return PSA_ID;
         case INT_NUM_TOKEN:
         case DOUBLE_NUM_TOKEN:
         case STRING_WORD_TOKEN:
         case UNIT_LIT_TOKEN:
         case TRUE_TOKEN:
         case FALSE_TOKEN:
+        case LIST_TOKEN:
             return PSA_ID;
         case EOF_TOKEN:
             return PSA_DOLLAR;
@@ -132,6 +143,9 @@ static AST_NODE *create_leaf(Token token) {
             node = ast_create(NULL, NULL, NULL, NODE_LITERAL);
             node->data_type = DATA_UNIT;
             break;
+        case LIST_TOKEN:
+            node = ast_ident_create(NULL, "List", NULL);
+            break;
         default:
             error_exit(ERROR_SYN, token.line, "Token is not an expression operand");
             return NULL;
@@ -162,6 +176,9 @@ static bool symbol_to_operator(PSASymbol symbol, OP_TYPE *operator) {
         case PSA_CONCAT: *operator = OP_ADD; return true;
         case PSA_AND: *operator = OP_AND; return true;
         case PSA_OR: *operator = OP_OR; return true;
+        case PSA_TO: *operator = OP_TO; return true;
+        case PSA_UNTIL: *operator = OP_UNTIL; return true;
+        case PSA_BY: *operator = OP_BY; return true;
         default: return false;
     }
 }
@@ -255,10 +272,74 @@ static Token consume_continuation(Token eol) {
     return parser_peek();
 }
 
-AST_NODE *precedence_parse(void) {
+static Token expect_token(Tokens type) {
+    Token tok = parser_peek();
+    if (tok.type != type) {
+        error_exit(ERROR_SYN, tok.line, "syntax error");
+    }
+    parser_advance();
+    return tok;
+}
+
+static AST_NODE *pop_postfix_operand(Stack *stack, int line) {
+    StackSymbol top_terminal = stack_top_terminal(stack);
+    if (top_terminal.kind == STACK_TERMINAL &&
+        (PSASymbol)top_terminal.token == PSA_RPAREN) {
+        reduce_stack(stack, line);
+    }
+    StackSymbol top = stack_pop(stack);
+    AST_NODE *node = NULL;
+    if (top.kind == STACK_NONTERMINAL) {
+        node = top.node;
+    } else if (top.kind == STACK_TERMINAL &&
+               (PSASymbol)top.token == PSA_ID) {
+        node = top.node;
+    } else {
+        error_exit(ERROR_SYN, line, "expected expression before postfix");
+    }
+    if (stack_top(stack).kind == STACK_MARKER) {
+        stack_pop(stack);
+    }
+    return node;
+}
+
+static AST_NODE *parse_call_args(void) {
+    expect_token(LPAR_TOKEN);
+    if (parser_peek().type == RPAR_TOKEN) {
+        parser_advance();
+        return NULL;
+    }
+    AST_NODE *params = NULL;
+    for (;;) {
+        AST_NODE *arg = precedence_parse_arg();
+        if (arg == NULL) {
+            error_exit(ERROR_SYN, parser_peek().line, "syntax error");
+        }
+        params = ast_append(arg, params);
+        Token t = parser_peek();
+        if (t.type == COMMA_TOKEN) {
+            parser_advance();
+            Token next = parser_peek();
+            if (next.type == RPAR_TOKEN) {
+                if (!next.check_new_line) {
+                    error_exit(ERROR_SYN, next.line,
+                               "trailing comma without end of line");
+                }
+                parser_advance();
+                return params;
+            }
+            continue;
+        }
+        expect_token(RPAR_TOKEN);
+        return params;
+    }
+}
+
+static AST_NODE *precedence_parse_internal(bool in_args) {
     Token input = parser_peek();
     Stack *stack = stack_init();
     bool expecting_operand = true;
+    int paren_depth = 0;
 
     stack_push(stack, (StackSymbol){
         .kind = STACK_TERMINAL,
@@ -274,6 +355,83 @@ AST_NODE *precedence_parse(void) {
 
         if (is_expression_end(input.type)) {
             break;
+        }
+
+        if (in_args && paren_depth == 0 &&
+            (input.type == COMMA_TOKEN || input.type == RPAR_TOKEN)) {
+            break;
+        }
+
+        if (expecting_operand && input.type == LPAR_TOKEN &&
+            parser_peek_next().type == RPAR_TOKEN) {
+            int line = input.line;
+            parser_advance();
+            parser_advance();
+            AST_NODE *unit = ast_unit_literal_create(NULL);
+            unit->line = line;
+            stack_push(stack, (StackSymbol){
+                .kind = STACK_NONTERMINAL,
+                .token = 0,
+                .node = unit
+            });
+            expecting_operand = false;
+            input = parser_peek();
+            continue;
+        }
+
+        if (expecting_operand && input.type == INTERP_START_TOKEN) {
+            AST_NODE *node = parser_parse_interp();
+            stack_push(stack, (StackSymbol){
+                .kind = STACK_NONTERMINAL,
+                .token = 0,
+                .node = node
+            });
+            expecting_operand = false;
+            input = parser_peek();
+            continue;
+        }
+
+        if (!expecting_operand && input.type == LPAR_TOKEN) {
+            AST_NODE *callee = pop_postfix_operand(stack, input.line);
+            AST_NODE *params = parse_call_args();
+            AST_NODE *call = NULL;
+            if (callee->type == NODE_IDENT && callee->name != NULL) {
+                call = ast_call_create(params, callee->name, false, true, NULL);
+                free_AST(callee);
+            } else if (callee->type == NODE_CALL && callee->is_method &&
+                       !callee->has_parens) {
+                callee->third = params;
+                callee->has_parens = true;
+                call = callee;
+            } else {
+                error_exit(ERROR_SYN, input.line,
+                           "expression is not callable");
+            }
+            call->line = input.line;
+            stack_push(stack, (StackSymbol){
+                .kind = STACK_NONTERMINAL,
+                .token = 0,
+                .node = call
+            });
+            input = parser_peek();
+            continue;
+        }
+
+        if (!expecting_operand && input.type == DOT_TOKEN) {
+            int line = input.line;
+            parser_advance();
+            Token member = expect_token(IDENTIFIER_TOKEN);
+            AST_NODE *recv = pop_postfix_operand(stack, line);
+            AST_NODE *node = ast_method_call_create(NULL, member.atribute,
+                                                    true, false, recv, NULL);
+            node->line = line;
+            stack_push(stack, (StackSymbol){
+                .kind = STACK_NONTERMINAL,
+                .token = 0,
+                .node = node
+            });
+            input = parser_peek();
+            continue;
         }
 
         StackSymbol top = stack_top_terminal(stack);
@@ -299,6 +457,9 @@ AST_NODE *precedence_parse(void) {
                         : NULL
                 });
                 expecting_operand = input_symbol == PSA_LPAREN ||
+                                    input_symbol == PSA_UN_PLUS ||
+                                    input_symbol == PSA_UN_MINUS ||
+                                    input_symbol == PSA_UN_NOT ||
                                     input_symbol == PSA_MUL ||
                                     input_symbol == PSA_DIV ||
                                     input_symbol == PSA_PLUS ||
@@ -311,7 +472,13 @@ AST_NODE *precedence_parse(void) {
                                     input_symbol == PSA_NEQ ||
                                     input_symbol == PSA_CONCAT ||
                                     input_symbol == PSA_AND ||
-                                    input_symbol == PSA_OR;
+                                    input_symbol == PSA_OR ||
+                                    input_symbol == PSA_TO ||
+                                    input_symbol == PSA_UNTIL ||
+                                    input_symbol == PSA_BY;
+                if (input_symbol == PSA_LPAREN) {
+                    paren_depth++;
+                }
                 parser_advance();
                 input = parser_peek();
                 break;
@@ -327,6 +494,9 @@ AST_NODE *precedence_parse(void) {
                     .node = NULL
                 });
                 expecting_operand = false;
+                if (input_symbol == PSA_RPAREN && paren_depth > 0) {
+                    paren_depth--;
+                }
                 parser_advance();
                 input = parser_peek();
                 break;
@@ -348,5 +518,13 @@ AST_NODE *precedence_parse(void) {
         : NULL;
     stack_dispose(stack);
     return root;
+}
+
+AST_NODE *precedence_parse(void) {
+    return precedence_parse_internal(false);
+}
+
+AST_NODE *precedence_parse_arg(void) {
+    return precedence_parse_internal(true);
 }
 

@@ -45,6 +45,15 @@ typedef enum{
   NODE_LIST_OF_LIST,
   NODE_PARAM_LIST,
 
+  //ALGEBDT
+  NODE_MATCH,
+  NODE_CASE,
+  NODE_WILDCARD,
+  NODE_TYPE_DEF,
+  NODE_CASE_CLASS,
+
+  NODE_TYPE_REF,
+
   //built ins
   print,
   read_line,
@@ -68,6 +77,8 @@ typedef enum{
   DATA_STRING,
   DATA_BOOL,
   DATA_UNIT,
+  DATA_LIST,
+  DATA_UNION,
 } DATA_TYPE;
 
 typedef enum{
@@ -87,6 +98,9 @@ typedef enum{
 
   OP_LE,
 
+  OP_TO,
+  OP_UNTIL,
+  OP_BY,
 }OP_TYPE;
 
 
@@ -96,6 +110,7 @@ struct AST_NODE{
   AST_NODE *right;
   AST_NODE *third;
   AST_NODE *next;
+  AST_NODE *type_ref;
 
   bool is_const; //only for NODE_DEF_VAR
   int line;  //error line, PARSER will define it
@@ -125,8 +140,8 @@ struct AST_NODE{
 
   //params
 
-  int list_no;
-  int list_more_lists;
+  int param_groups;
+  int param_cnt;
 
   char *name;
   bool inclusive;
@@ -273,6 +288,22 @@ AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt)
  */
 
 
+
+AST_NODE *ast_type_ref_create(DATA_TYPE base, char *name, AST_NODE *next);
+
+AST_NODE *ast_list_type_ref_create(AST_NODE *elem, AST_NODE *next);
+
+AST_NODE *ast_union_type_ref_create(AST_NODE *left, AST_NODE *right, AST_NODE *next);
+
+AST_NODE *ast_type_def_create(char *name, AST_NODE *type, AST_NODE *next);
+
+AST_NODE *ast_case_class_create(char *name, AST_NODE *params, AST_NODE *next);
+
+AST_NODE *ast_match_create(AST_NODE *subject, AST_NODE *cases, AST_NODE *next);
+
+AST_NODE *ast_case_create(AST_NODE *pattern, AST_NODE *guard, AST_NODE *body, AST_NODE *next);
+
+AST_NODE *ast_wildcard_create(AST_NODE *next);
 
 AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
 /*   new_node ---next3---> next2 ---next1---> ...

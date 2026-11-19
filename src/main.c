@@ -9,6 +9,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "generator.h"
+#include "parser/semantic.h"
 
 int main(void) {
     AST_NODE *root = parse_program();
@@ -17,6 +18,8 @@ int main(void) {
         return ERROR_INTERNAL;
     }
     
+    semantic_analyze(root);
+
     Gen gen = {0};
     generator_init(&gen, root);
 

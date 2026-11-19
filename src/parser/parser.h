@@ -11,7 +11,9 @@
 #include "scanner/token.h"
 
 Token parser_peek(void);
+Token parser_peek_next(void);
 Token parser_advance(void);
+AST_NODE *parser_parse_interp(void);
 
 // Parses the input from stdin, returns the AST root.
 // Exits with the error code through error_exit on failure.

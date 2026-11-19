@@ -206,14 +206,62 @@ AST_NODE *ast_create_extension(AST_NODE *expr, AST_NODE *params,AST_NODE *next, 
 
 AST_NODE *ast_create_params_list_of_list(AST_NODE *next_param_list, int list_cnt) {
   AST_NODE *node = ast_create(NULL, NULL, next_param_list, NODE_LIST_OF_LIST);
-  node->list_no = list_cnt;
+  node->param_groups = list_cnt;
   return node;
 }
 
 AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt) {
   AST_NODE *node = ast_create(params,NULL, next, NODE_PARAM_LIST);
-  node->list_more_lists = param_cnt;
+  node->param_cnt = param_cnt;
   return node;
+}
+
+AST_NODE *ast_type_ref_create(DATA_TYPE base, char *name, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL, NULL, next, NODE_TYPE_REF);
+  node->data_type = base;
+  if (name != NULL) {
+    ast_name(node, name);
+  }
+  return node;
+}
+
+AST_NODE *ast_list_type_ref_create(AST_NODE *elem, AST_NODE *next) {
+  AST_NODE *node = ast_create(elem, NULL, next, NODE_TYPE_REF);
+  node->data_type = DATA_LIST;
+  return node;
+}
+
+AST_NODE *ast_union_type_ref_create(AST_NODE *left, AST_NODE *right, AST_NODE *next) {
+  AST_NODE *node = ast_create(left, right, next, NODE_TYPE_REF);
+  node->data_type = DATA_UNION;
+  return node;
+}
+
+AST_NODE *ast_type_def_create(char *name, AST_NODE *type, AST_NODE *next) {
+  AST_NODE *node = ast_create(type, NULL, next, NODE_TYPE_DEF);
+  ast_name(node, name);
+  return node;
+}
+
+AST_NODE *ast_case_class_create(char *name, AST_NODE *params, AST_NODE *next) {
+  AST_NODE *node = ast_create(NULL, NULL, next, NODE_CASE_CLASS);
+  node->third = params;
+  ast_name(node, name);
+  return node;
+}
+
+AST_NODE *ast_match_create(AST_NODE *subject, AST_NODE *cases, AST_NODE *next) {
+  return ast_create(subject, cases, next, NODE_MATCH);
+}
+
+AST_NODE *ast_case_create(AST_NODE *pattern, AST_NODE *guard, AST_NODE *body, AST_NODE *next) {
+  AST_NODE *node = ast_create(pattern, guard, next, NODE_CASE);
+  node->third = body;
+  return node;
+}
+
+AST_NODE *ast_wildcard_create(AST_NODE *next) {
+  return ast_create(NULL, NULL, next, NODE_WILDCARD);
 }
 
 AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next) {
@@ -234,6 +282,7 @@ void free_AST(AST_NODE *node) {
   free_AST(node->right);
   free_AST(node->next);
   free_AST(node->third);
+  free_AST(node->type_ref);
   free(node->name);
   free(node->sval);
   free(node);
@@ -252,6 +301,8 @@ static const char *data_type_name(DATA_TYPE t) {
     case DATA_STRING: return "String";
     case DATA_BOOL:   return "Bool";
     case DATA_UNIT:   return "Unit";
+    case DATA_LIST:   return "List";
+    case DATA_UNION:  return "Union";
     default:          return "?";
   }
 }
@@ -271,6 +322,9 @@ static const char *op_name(OP_TYPE op) {
     case OP_AND: return "&&";
     case OP_OR:  return "||";
     case OP_NOT: return "!";
+    case OP_TO:  return "to";
+    case OP_UNTIL: return "until";
+    case OP_BY:  return "by";
     default:     return "?op";
   }
 }
@@ -298,6 +352,12 @@ static const char *type_name(NODE_TYPE t) {
     case NODE_INTERP:       return "INTERP";
     case NODE_LIST_OF_LIST: return "LIST_OF_LIST";
     case NODE_PARAM_LIST:   return "PARAM_LIST";
+    case NODE_MATCH:        return "MATCH";
+    case NODE_CASE:         return "CASE";
+    case NODE_WILDCARD:     return "WILDCARD";
+    case NODE_TYPE_DEF:     return "TYPE_DEF";
+    case NODE_CASE_CLASS:   return "CASE_CLASS";
+    case NODE_TYPE_REF:     return "TYPE_REF";
     default:                return "BUILTIN?";
   }
 }
@@ -487,10 +547,11 @@ void ast_print_node(const AST_NODE *node) {
   }
   print_node_text(stderr, node);
 
-  const char *names[4] = {"left", "right", "third", "next"};
-  const AST_NODE *ptrs[4] = {node->left, node->right, node->third, node->next};
+  const char *names[5] = {"left", "right", "third", "next", "type"};
+  const AST_NODE *ptrs[5] = {node->left, node->right, node->third, node->next,
+                             node->type_ref};
   const char *sep = "  [";
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     if (ptrs[i]) {
       fprintf(stderr, "%s%s", sep, names[i]);
       sep = ", ";

@@ -31,7 +31,7 @@ void lower_members(AST_NODE *root) {
     if (fn->third)lower_members(fn->third);
 
 
-    if (fn->type == NODE_CALL && fn->is_method == true && fn->has_parens ==false && fn->left) {
+    if (fn->type == NODE_CALL && fn->is_method == true && fn->third == NULL && fn->left) {
       if (strcmp(fn->name, "toString") == 0) {
         free(fn->name);
         ast_name(fn, "toStr");
@@ -135,13 +135,36 @@ void emit_string_literal(Gen *gen, char *str) {
   }
 }
 
-static void process_params(AST_NODE *node) {
-  if (node) {
-    printf("DEFVAR LF@%s$%d\n", node->name,node->id);
-    process_params(node->next);
-    printf("POPS LF@%s$%d\n", node->name, node->id);
+static void defvar_params(AST_NODE *groups) {
+  for (AST_NODE *g = groups; g != NULL; g = g->next) {
+    for (AST_NODE *p = g->left; p != NULL; p = p->next) {
+      printf("DEFVAR LF@%s$%d\n", p->name, p->id);
+    }
   }
+}
 
+static void pop_param_chain(AST_NODE *param) {
+  if (param == NULL) {
+    return;
+  }
+  pop_param_chain(param->next);
+  printf("POPS LF@%s$%d\n", param->name, param->id);
+}
+
+static void pop_params(AST_NODE *groups) {
+  if (groups == NULL) {
+    return;
+  }
+  pop_params(groups->next);
+  pop_param_chain(groups->left);
+}
+
+static void process_params(AST_NODE *groups) {
+  if (groups == NULL) {
+    return;
+  }
+  defvar_params(groups->next);
+  pop_params(groups->next);
 }
 
 void gen_function(Gen *gen, AST_NODE *fn) {
@@ -158,8 +181,11 @@ void gen_function(Gen *gen, AST_NODE *fn) {
  */
 
 
-  //print all variables
-  emit_defvars(gen, fn);
+  //print all variables of this function
+  if (fn->left != NULL) {
+    print_defvar(fn->left, gen);
+  }
+  emit_defvars(gen, fn->left);
 
   //parametry - muze jich byt nekonecno? rekurzivni funkce vyrvarejici LF@tmp
   //=============================
