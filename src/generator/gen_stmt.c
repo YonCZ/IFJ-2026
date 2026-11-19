@@ -84,6 +84,9 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
 
     case NODE_FOR: {
       AST_NODE *range = node->left;
+      if (range == NULL) {
+        break;
+      }
 
       //assign variables
       gen_expr(gen, range->left);

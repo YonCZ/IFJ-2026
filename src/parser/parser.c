@@ -19,6 +19,7 @@
 #include "scanner/scanner.h"
 #include "scanner/token.h"
 #include "scanner/error.h"
+#include "symtable/precedence.h"
 
 // All tokens of the input, loaded once at the start.
 static Token *tokens;
@@ -105,6 +106,9 @@ static void parse_prolog(void) {
     parser_expect(DOT_TOKEN);
     parser_expect(MUL_TOKEN);
     parser_expect(EOL_TOKEN);
+    if (parser_peek().type == DEDENT_TOKEN) {
+        parser_advance(); // closes the indentation of the prolog line
+    }
 }
 
 
@@ -498,6 +502,47 @@ static AST_NODE *parse_interp(void);
 static void check_range_shape(int start);
 
 // Skips an expression, returns NULL or the interp node.
+// True when the precedence analysis can handle the expression at the cursor.
+// Calls, member access, ranges, match, if-expressions and interpolation
+// still go through skip_expression.
+static bool precedence_can_parse(void) {
+    int depth = 0;
+    bool prev_operand = false;
+    for (int i = pos; i < ntokens; i++) {
+        Tokens t = tokens[i].type;
+        if (t == LPAR_TOKEN && prev_operand) {
+            return false; // call
+        }
+        if (t == LPAR_TOKEN && i + 1 < ntokens && tokens[i + 1].type == RPAR_TOKEN) {
+            return false; // unit literal ()
+        }
+        if (t == DOT_TOKEN || t == INTERP_START_TOKEN || t == MATCH_TOKEN ||
+            t == IF_TOKEN || t == ASSIGN_TOKEN) {
+            return false;
+        }
+        if (t == IDENTIFIER_TOKEN && is_range_word(tokens[i])) {
+            return false; // to, until, by
+        }
+        if (depth == 0 &&
+            (t == EOL_TOKEN || t == SEMICOLON_TOKEN || t == THEN_TOKEN ||
+             t == DO_TOKEN || t == ELSE_TOKEN || t == ARROW_FAT_TOKEN ||
+             t == COMMA_TOKEN || t == RPAR_TOKEN || t == DEDENT_TOKEN ||
+             t == EOF_TOKEN)) {
+            return true;
+        }
+        if (t == LPAR_TOKEN) {
+            depth++;
+        } else if (t == RPAR_TOKEN) {
+            depth--;
+        }
+        prev_operand = t == IDENTIFIER_TOKEN || t == INT_NUM_TOKEN ||
+                       t == DOUBLE_NUM_TOKEN || t == STRING_WORD_TOKEN ||
+                       t == TRUE_TOKEN || t == FALSE_TOKEN ||
+                       t == UNIT_LIT_TOKEN || t == RPAR_TOKEN;
+    }
+    return true;
+}
+
 static AST_NODE *parse_rhs(void) {
     Token t = parser_peek();
     if (t.type == INTERP_START_TOKEN) {
@@ -509,6 +554,11 @@ static AST_NODE *parse_rhs(void) {
         error_exit(ERROR_SYN, t.line, "syntax error");
     }
     int start = pos;
+    if (precedence_can_parse()) {
+        AST_NODE *node = precedence_parse();
+        check_range_shape(start);
+        return node;
+    }
     skip_expression();
     check_range_shape(start);
     return NULL;
@@ -1024,6 +1074,20 @@ static AST_NODE *parse_func_def(void) {
     int groups = 0;
     bool has_parens = parse_params(&params, &groups);
     DATA_TYPE ret = parse_ret_type();
+    if (is_main) {
+        if (params != NULL) {
+            int count = 0;
+            for (AST_NODE *p = params; p != NULL; p = p->next) {
+                count++;
+            }
+            if (count > 0) {
+                error_exit(ERROR_SEM_ARG, id.line, "main must have no parameters");
+            }
+        }
+        if (ret != DATA_NONE && ret != DATA_UNIT) {
+            error_exit(ERROR_SEM_TYPE, id.line, "main must return Unit");
+        }
+    }
     parser_expect(ASSIGN_TOKEN);
     AST_NODE *body = parse_body();
     AST_NODE *node = ast_func_def_create(body, params, NULL, ret, id.atribute,
@@ -1110,8 +1174,39 @@ AST_NODE *parse_program(void) {
     debug_print_tokens();
 #endif
 
+    while (parser_peek().type == INDENT_TOKEN) {
+        parser_advance(); // leading spaces before the prolog
+    }
     parse_prolog();
     AST_NODE *funcs = parse_func_defs();
+
+    AST_NODE *main_fn = NULL;
+    for (AST_NODE *fn = funcs; fn != NULL; fn = fn->next) {
+        if (!fn->is_main) {
+            continue;
+        }
+        if (main_fn != NULL) {
+            error_exit(ERROR_SEM_REDEF, fn->line, "multiple main functions");
+        }
+        main_fn = fn;
+    }
+    if (main_fn == NULL) {
+        error_exit(ERROR_SEM_UNDEF, 1, "missing main function");
+    }
+
+    for (AST_NODE *fn = funcs; fn != NULL; fn = fn->next) {
+        if (fn->is_extension || fn->name == NULL) {
+            continue;
+        }
+        for (AST_NODE *other = fn->next; other != NULL; other = other->next) {
+            if (other->is_extension || other->name == NULL) {
+                continue;
+            }
+            if (strcmp(fn->name, other->name) == 0) {
+                error_exit(ERROR_SEM_REDEF, other->line, "function redefined");
+            }
+        }
+    }
 
     AST_NODE *root = ast_create(funcs, NULL, NULL, NODE_PROGRAM);
     parser_cleanup();

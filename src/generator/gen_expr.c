@@ -53,6 +53,9 @@ void push_to_val(AST_NODE *node) {
 }
 
 void gen_expr(Gen *gen, AST_NODE *node) {
+  if (node == NULL) {
+    return;
+  }
   switch (node->type) {
     case NODE_CALL:
       /*===============

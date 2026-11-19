@@ -43,6 +43,6 @@ typedef enum {
     PSA_TABLE_SIZE   // počet symbolů (20)
 } PSASymbol;
 
-AST_NODE *precedence_parse(FILE *file);
+AST_NODE *precedence_parse(void);
 
 #endif

@@ -33,6 +33,7 @@ for lists extension:
 #include "stack.h"
 #include "precedence.h"
 #include "error.h"
+#include "parser/parser.h"
 #include <stdlib.h>
 
 const PrecedenceRel PSA_TABLE[PSA_TABLE_SIZE][PSA_TABLE_SIZE] = {
@@ -64,6 +65,7 @@ static bool is_expression_end(Tokens type) {
            type == ELSE_TOKEN ||
            type == DO_TOKEN ||
            type == EOL_TOKEN ||
+           type == RBRACE_TOKEN ||
            type == EOF_TOKEN;
 }
 
@@ -136,7 +138,6 @@ static AST_NODE *create_leaf(Token token) {
     }
 
     node->line = token.line;
-    free(token.atribute);
     return node;
 }
 
@@ -242,19 +243,20 @@ static void reduce_stack(Stack *stack, int line) {
     });
 }
 
-static Token consume_continuation(FILE *file, Token eol) {
-    Token indent = get_token(file);
+static Token consume_continuation(Token eol) {
+    parser_advance();
+    Token indent = parser_advance();
 
     if (indent.type != INDENT_TOKEN) {
         error_exit(ERROR_SYN, eol.line,
                    "Continuation line must be indented");
     }
 
-    return get_token(file);
+    return parser_peek();
 }
 
-AST_NODE *precedence_parse(FILE *file) {
-    Token input = get_token(file);
+AST_NODE *precedence_parse(void) {
+    Token input = parser_peek();
     Stack *stack = stack_init();
     bool expecting_operand = true;
 
@@ -266,7 +268,7 @@ AST_NODE *precedence_parse(FILE *file) {
 
     while (true) {
         if (input.type == EOL_TOKEN && expecting_operand) {
-            input = consume_continuation(file, input);
+            input = consume_continuation(input);
             continue;
         }
 
@@ -310,7 +312,8 @@ AST_NODE *precedence_parse(FILE *file) {
                                     input_symbol == PSA_CONCAT ||
                                     input_symbol == PSA_AND ||
                                     input_symbol == PSA_OR;
-                input = get_token(file);
+                parser_advance();
+                input = parser_peek();
                 break;
             case REL_GT:
                 // Reduce operation
@@ -324,7 +327,8 @@ AST_NODE *precedence_parse(FILE *file) {
                     .node = NULL
                 });
                 expecting_operand = false;
-                input = get_token(file);
+                parser_advance();
+                input = parser_peek();
                 break;
             case REL_ERR:
                 // Error handling
