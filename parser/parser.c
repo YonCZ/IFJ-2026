@@ -53,12 +53,11 @@ static void load_tokens(FILE *f) {
 }
 
 // Returns the current token without consuming it.
-static inline Token parser_peek(void) {
+Token parser_peek(void) {
     return tokens[pos];
 }
 
-// Returns the current token and moves the cursor forward.
-static inline Token parser_advance(void) {
+Token parser_advance(void) {
     return tokens[pos++];
 }
 
@@ -280,12 +279,9 @@ static bool is_expr_start(Tokens t) {
 static AST_NODE *parse_interp(void);
 static void parse_match_expr(void);
 
-// to, until and by are IDs checked by strcmp.
+// Range words to, until and by come from the scanner as real tokens.
 static bool is_range_word(Token t) {
-    return t.type == IDENTIFIER_TOKEN && t.atribute != NULL &&
-           (strcmp(t.atribute, "to") == 0 ||
-            strcmp(t.atribute, "until") == 0 ||
-            strcmp(t.atribute, "by") == 0);
+    return t.type == TO_TOKEN || t.type == UNTIL_TOKEN || t.type == BY_TOKEN;
 }
 
 // PatArg → ID, literal, _, or negative number (flat, no recursion).
@@ -550,12 +546,10 @@ static void check_range_shape(int start) {
                 prev_operand = false;
                 prev_dot = false;
                 continue;
-            case DOT_TOKEN:
-                prev_dot = true;
-                continue;
-            case IDENTIFIER_TOKEN:
-                if (!prev_dot && prev_operand && is_range_word(t)) {
-                    if (strcmp(t.atribute, "by") == 0) {
+            case TO_TOKEN: case UNTIL_TOKEN: case BY_TOKEN:
+                // range words are operators, check the shape
+                if (!prev_dot && prev_operand) {
+                    if (t.type == BY_TOKEN) {
                         if (dir[depth] != 1 || by[depth]) {
                             error_exit(ERROR_SYN, t.line, "syntax error");
                         }
@@ -564,7 +558,27 @@ static void check_range_shape(int start) {
                         if (dir[depth] != 0 || by[depth]) {
                             error_exit(ERROR_SYN, t.line, "syntax error");
                         }
-                        dir[depth] = (strcmp(t.atribute, "to") == 0) ? 1 : 2;
+                        dir[depth] = (t.type == TO_TOKEN) ? 1 : 2;
+                    }
+                }
+                prev_operand = false;
+                prev_dot = false;
+                continue;
+            case DOT_TOKEN:
+                prev_dot = true;
+                continue;
+            case IDENTIFIER_TOKEN:
+                if (!prev_dot && prev_operand && is_range_word(t)) {
+                    if (t.type == BY_TOKEN) {
+                        if (dir[depth] != 1 || by[depth]) {
+                            error_exit(ERROR_SYN, t.line, "syntax error");
+                        }
+                        by[depth] = true;
+                    } else {
+                        if (dir[depth] != 0 || by[depth]) {
+                            error_exit(ERROR_SYN, t.line, "syntax error");
+                        }
+                        dir[depth] = (t.type == TO_TOKEN) ? 1 : 2;
                     }
                     prev_operand = false;
                     prev_dot = false;

@@ -17,7 +17,7 @@
 static cleanup cleanups[MAX_CLEANUPS];
 static int cleanup_count = 0;
 
-//
+//funkce na vypis vsech chyb
 static const char* error_string(Error_state code) {
     switch (code) {
         case ERROR_LEX:
@@ -43,12 +43,14 @@ static const char* error_string(Error_state code) {
     }
 }
 
+//funkce na uklizeni
 void error_cleanup(cleanup st) {
     if (cleanup_count < MAX_CLEANUPS) {
         cleanups[cleanup_count++] = st;
     }
 }
 
+//funkce na vypis
 void error_exit(Error_state code, int line, const char *name, ...) {
     fprintf(stderr, "%s", error_string(code));
     if (line > 0) {

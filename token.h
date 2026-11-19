@@ -1,5 +1,3 @@
-
-
 /*
  * IFJ Implimentace prekladace
  * Soubor: token.h
@@ -77,9 +75,6 @@ typedef enum {
 
     //ROZSIRENI
     FOR_TOKEN,               //for cyklus
-    TO_TOKEN,                //to
-    UNTIL_TOKEN,             //until
-    BY_TOKEN,                //by
     AND_TOKEN,               //&&
     OR_TOKEN,                //||
     NOT_TOKEN,               //!
@@ -92,7 +87,6 @@ typedef enum {
     EXTENSION_TOKEN,         //extension
     LIST_TOKEN,              //list
 
-<<<<<<< HEAD
     PLUSPLUS_TOKEN,
     LBRACKET_TOKEN,          //[
     RBRACKET_TOKEN,          //]
@@ -102,6 +96,7 @@ typedef enum {
     ARROW_LEFT_TOKEN,        //<-
     ARROW_RIGHT_TOKEN,
     ARROW_TOKEN,
+    EXPRESION_TOKEN,           //expression
     UNDERSCORE_TOKEN,        // _
     PIPE_TOKEN,              //|
     INTERP_START_TOKEN,      //zacatek interpolace
@@ -109,23 +104,6 @@ typedef enum {
     INTERP_END_TOKEN,        //konec interpolace
 } Tokens;
 
-=======
-    LBRACKET_TOKEN,      //[
-    RBRACKET_TOKEN,      //]
-    ARROW_FAT_TOKEN,      //=>
-    ARROW_LEFT_TOKEN,   //<-
-    PIPE_TOKEN,        //|
-    
-    //rozsireni interpolaci
-    INTERP_START_TOKEN, //text od s" po prvni $
-    INTERP_END_TOKEN,   //text mezi dveme interpolacemi
-    INTERP_MID_TOKEN,  //posledni textova cast
-    LBRACE_TOKEN,      //{
-    RBRACE_TOKEN,      //}
-} Tokens;
-
-//promt: potrebuju v c u scanneru udrzovat stav mezi volanimi funkce (zasobnik na znaky back_stack, top, current_line a dstring pro retizky). nevim presne jak to nejlip ulozit, myslis ze static promenny takhle na zacatku souboru jsou v pohode? a bude to spravne navazovat na moje vlastni ungetc a fgetc? zkontroluj mi jestli tenhle zapis dává smysl
->>>>>>> origin/feature/parser
 typedef struct {
     Tokens type;   //typ tokenu
     char *atribute;  //hodnota textu
