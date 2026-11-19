@@ -136,36 +136,43 @@ void cg_dprint(){}
 *===========================================================
  */
 
+int new_label(Gen *gen) {
+  return gen->label_counter++;
+}
+
 //writes definition of variables in function right after pushFrame
-void print_defvar(AST_NODE *node) {
+void print_defvar(AST_NODE *node, Gen *gen) {
   if (node->type==NODE_VAR_DEF) {
     printf("DEFVAR LF@%s$%d\n", node->name,node->id);
+  }
+  if (node->type==NODE_FOR) {
+    printf("DEFVAR LF@%s$%d\n", node->name,node->id);
+    printf("DEFVAR LF@for_end$%d\n",node->id);
+    printf("DEFVAR LF@for_step$%d\n",node->id);
   }
 }
 void emit_defvars(Gen *gen, AST_NODE *node) {
   if (!node)return;
   if (node->left != NULL) {
-    print_defvar(node->left);
+    print_defvar(node->left,gen);
     emit_defvars(gen,node->left);
   }
   if (node->right != NULL) {
-    print_defvar(node->right);
+    print_defvar(node->right, gen);
     emit_defvars(gen,node->right);
   }
   if (node->third != NULL) {
-    print_defvar(node->third);
+    print_defvar(node->third, gen);
     emit_defvars(gen,node->third);
   }
   if (node->next!=NULL) {
-    print_defvar(node->next);
+    print_defvar(node->next, gen);
     emit_defvars(gen,node->next);
   }
 }
 
 
-int new_label(Gen *gen) {
-  return gen->label_counter++;
-}
+
 
 /*
  *special characters
@@ -237,8 +244,11 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   //TODO zkontrolovat jestli tady bude moct byt left - je to uz druhe left (1. je v program init)
   //TODO znamenalo by to program -> body -> function ale to prece nenamem
   for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
-    if (node->next==NULL && node->type == NODE_EXPR_STMT && fn->data_type != DATA_UNIT) {
+    if (node->next==NULL && fn->data_type != DATA_UNIT && node->type == NODE_EXPR_STMT) {
       gen_expr(gen, node->left);
+    }
+    else if (node->next == NULL && fn->data_type != DATA_UNIT && node->type == NODE_IF) {
+      gen_expr(gen,node);
     }
     else {
       gen_stmt(gen, node);

@@ -2,7 +2,7 @@
  * Projekt: IFJ26 – překladač jazyka IFJ26 do IFJcode26
  * Soubor:  test_generator.c – test generátoru kódu (fáze 0: kostra, 1: konstanty a print,
  *                            2: výrazy, 3: proměnné, 4: if a while, 5: funkce,
- *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN)
+ *                            6: vestavěné funkce, 7: rozšíření BOOLTHEN, 8: rozšíření CONTROL – cyklus for a if jako výraz)
  *
  * ---------------------------------------------------------------------------
  * Tento soubor vygenerovala AI: Claude Sonnet 5.5 (Anthropic, claude-sonnet-5-5), 2026-11-17.
@@ -16,6 +16,9 @@
  * Prompt 6: "delej test pro fazi 5" (funkce: volání, parametry, return, rekurze)
  * Prompt 7: "chci abys mi builtins udelal tz" (fáze 6: vestavěné funkce, vstup, běhové chyby)
  * Prompt 8: "udelej testy pro booltehn" (fáze 7: Boolean, !, && a || se zkratem, readBoolean)
+ * Prompt 9: "udelej test na for loop" (fáze 8: for s to / until / by, stráže, vnořené cykly)
+ * Prompt 10: "uprav test pro cele rozsireni control odendej 4 testy ktere ted nevychazi" (fáze 8 je celé
+ *            CONTROL: for + if jako výraz; testy se záporným krokem odebrány)
  * Zadal a zrevidoval: Pavel Novák (xnovakp01)
  * ---------------------------------------------------------------------------
  *
@@ -33,8 +36,8 @@
  *         -o test_generator && ./test_generator
  *
  * POUŽITÍ
- *     ./test_generator              všechny případy (fáze 0 až 7)
- *     ./test_generator f7           jen fáze 7 (f0 až f6 = jen ta fáze)
+ *     ./test_generator              všechny případy (fáze 0 až 8)
+ *     ./test_generator f8           jen fáze 8 (f0 až f7 = jen ta fáze)
  *     ./test_generator f1_string    jen případ s tímto jménem
  *     ./test_generator -v           vypíše vygenerovaný kód i u případů, které prošly
  *     INTERP=cesta/k/ic26int ./test_generator
@@ -1685,6 +1688,407 @@ static AST_NODE *build_f7_readbool_if(void) { /* if readBoolean() then yes else 
 #undef B
 #undef U
 
+/* fáze 8: rozšíření CONTROL, cyklus for. Tvar uzlu podle ast.h (ast_for_create / ast_range_create):
+ *   NODE_FOR:   left = rozsah (NODE_RANGE), right = tělo (řetěz příkazů přes next, může být NULL),
+ *               third = stráže (řetěz výrazů přes next, nebo NULL), name = jméno řídicí proměnné,
+ *               id = číslo řídicí proměnné od sémantiky (v kódu LF@jmeno$id)
+ *   NODE_RANGE: left = od, right = do, third = krok (NULL = krok 1),
+ *               inclusive = true pro "to" (konec se bere), false pro "until" (konec se nebere)
+ * Řídicí proměnná je Int. Meze a krok se vyhodnotí jednou před cyklem. Krok 0 = chyba 40 za běhu.
+ * "until ... by" gramatika nepovoluje (by jde jen za to), proto se netestuje. Záporný krok se netestuje
+ * (zadání ho nevyžaduje, říká jen "nenulový krok").
+ *
+ * if jako výraz: stejný uzel NODE_IF (left = podmínka, right = větev then, third = větev else), jen
+ * data_type je typ výsledku. Větev je řetěz příkazů, jehož POSLEDNÍ příkaz dává hodnotu: buď
+ * NODE_EXPR_STMT s výrazem v left, nebo vnořený NODE_IF (else if má třetí větev rovnou NODE_IF).
+ * Příkazy před posledním se jen provedou. Zadání: else je povinný, větve mají shodný typ (nebo Int a
+ * Double: pak má uzel typ Double a Int větev se převede).
+ * Čísla proměnných: řídicí proměnné cyklů mají 1 až 9, ostatní proměnné od 10. */
+#define I DATA_INT
+#define B DATA_BOOL
+#define U DATA_UNIT
+#define UI(name, id) use((name), (id), I)
+#define PS(str, nx) print_stmt(lit_s(str), (nx))
+#define P(e, nx) print_stmt((e), (nx))
+#define PRI(nx) P(UI("i", 1), (nx)) /* print(i) s číslem 1 */
+#define LT_(l, r) bin(OP_LT, (l), (r), B)
+#define GT_(l, r) bin(OP_GT, (l), (r), B)
+#define EQ_(l, r) bin(OP_EQ, (l), (r), B)
+#define NEQ_(l, r) bin(OP_NEQ, (l), (r), B)
+#define MUL_(l, r) bin(OP_MUL, (l), (r), I)
+#define PLUS(l, r) add_int((l), (r))
+#define LI(v) lit_i(v)
+
+static AST_NODE *prog8(AST_NODE *body) { return make_program(main_fn(body, NULL)); }
+
+static AST_NODE *for_stmt(const char *name, int id, AST_NODE *from, AST_NODE *to, AST_NODE *step,
+                          bool inclusive, AST_NODE *guards, AST_NODE *body, AST_NODE *next) {
+  AST_NODE *range = ast_range_create(from, to, step, NULL, inclusive);
+  AST_NODE *n = ast_for_create(range, body, guards, next, (char *)name);
+  n->id = id;
+  return n;
+}
+/* for name <- a to b do body */
+#define FT(nm, id, a, b, body, nx) for_stmt((nm), (id), (a), (b), NULL, true, NULL, (body), (nx))
+/* for name <- a until b do body */
+#define FU(nm, id, a, b, body, nx) for_stmt((nm), (id), (a), (b), NULL, false, NULL, (body), (nx))
+/* for name <- a to b by step do body */
+#define FS(nm, id, a, b, step, body, nx) for_stmt((nm), (id), (a), (b), (step), true, NULL, (body), (nx))
+/* for name <- a to b if guards do body (stráže = řetěz výrazů) */
+#define FG(nm, id, a, b, g, body, nx) for_stmt((nm), (id), (a), (b), NULL, true, (g), (body), (nx))
+static AST_NODE *two_guards(AST_NODE *a, AST_NODE *b) {
+  a->next = b;
+  return a;
+}
+#define I1 UI("i", 1)
+#define I2 UI("j", 2)
+
+/* --- rozsahy bez kroku a bez stráží --- */
+static AST_NODE *build_f8_to(void) { return prog8(FT("i", 1, LI(1), LI(3), PRI(NULL), NULL)); }
+static AST_NODE *build_f8_until(void) { return prog8(FU("i", 1, LI(1), LI(4), PRI(NULL), NULL)); }
+static AST_NODE *build_f8_to_once(void) { return prog8(FT("i", 1, LI(5), LI(5), PRI(NULL), NULL)); }
+static AST_NODE *build_f8_until_empty(void) {
+  return prog8(FU("i", 1, LI(3), LI(3), PS("x", NULL), PS(".", NULL)));
+}
+static AST_NODE *build_f8_to_empty(void) {
+  return prog8(FT("i", 1, LI(5), LI(3), PS("x", NULL), PS(".", NULL)));
+}
+static AST_NODE *build_f8_around(void) { /* příkazy před cyklem a za ním */
+  return prog8(PS("<", FT("i", 1, LI(1), LI(2), PRI(NULL), PS(">", NULL))));
+}
+static AST_NODE *build_f8_neg_lit(void) { /* for i <- -2 to 2 */
+  return prog8(FT("i", 1, neg(LI(2), I), LI(2), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_expr_bounds(void) { /* for i <- 1 + 1 to 2 * 2 */
+  return prog8(FT("i", 1, PLUS(LI(1), LI(1)), MUL_(LI(2), LI(2)), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_var_bounds(void) { /* val a = 3; val b = 5; for i <- a to b */
+  return prog8(vdef("a", 10, true, I, LI(3), vdef("b", 11, true, I, LI(5),
+                    FT("i", 1, UI("a", 10), UI("b", 11), PRI(NULL), NULL))));
+}
+static AST_NODE *build_f8_empty_body(void) { /* tělo je prázdné (right == NULL), generátor nesmí spadnout */
+  return prog8(FT("i", 1, LI(1), LI(3), NULL, PS("x", NULL)));
+}
+static AST_NODE *build_f8_big(void) { /* var s = 0; for i <- 1 to 100 do s = s + i; print(s) */
+  return prog8(vdef("s", 10, false, I, LI(0),
+                    FT("i", 1, LI(1), LI(100), assign(UI("s", 10), PLUS(UI("s", 10), I1), NULL),
+                       P(UI("s", 10), NULL))));
+}
+
+/* --- řídicí proměnná a tělo --- */
+static AST_NODE *build_f8_use_i(void) { /* print(i * i) */
+  return prog8(FT("i", 1, LI(1), LI(4), P(MUL_(I1, I1), NULL), NULL));
+}
+static AST_NODE *build_f8_sum(void) { /* var s = 0; for i <- 1 to 4 do s = s + i; print(s) */
+  return prog8(vdef("s", 10, false, I, LI(0),
+                    FT("i", 1, LI(1), LI(4), assign(UI("s", 10), PLUS(UI("s", 10), I1), NULL),
+                       P(UI("s", 10), NULL))));
+}
+static AST_NODE *build_f8_body_var(void) { /* val d = i * 2 uvnitř těla (DEFVAR nahoře, ne v cyklu) */
+  return prog8(FT("i", 1, LI(1), LI(3),
+                  vdef("d", 10, true, I, MUL_(I1, LI(2)), P(UI("d", 10), NULL)), NULL));
+}
+static AST_NODE *build_f8_if_inside(void) { /* for i <- 1 to 4 do if i > 2 then print(i) */
+  return prog8(FT("i", 1, LI(1), LI(4), if_stmt(GT_(I1, LI(2)), PRI(NULL), NULL, NULL), NULL));
+}
+static AST_NODE *build_f8_while_inside(void) { /* v každém kole nová proměnná k = 0 a while do i */
+  return prog8(FT("i", 1, LI(1), LI(2),
+                  vdef("k", 10, false, I, LI(0),
+                       while_stmt(LT_(UI("k", 10), I1),
+                                  P(UI("k", 10), assign(UI("k", 10), PLUS(UI("k", 10), LI(1)), NULL)),
+                                  NULL)),
+                  NULL));
+}
+static AST_NODE *build_f8_in_while(void) { /* while n < 2 do { for i <- 1 to 2 do print(i); n = n + 1 } */
+  return prog8(vdef("n", 10, false, I, LI(0),
+                    while_stmt(LT_(UI("n", 10), LI(2)),
+                               FT("i", 1, LI(1), LI(2), PRI(NULL),
+                                  assign(UI("n", 10), PLUS(UI("n", 10), LI(1)), NULL)),
+                               NULL)));
+}
+
+/* --- víc cyklů --- */
+static AST_NODE *build_f8_nested(void) { /* print(i * 10 + j) */
+  return prog8(FT("i", 1, LI(1), LI(2),
+                  FT("j", 2, LI(1), LI(2), P(PLUS(MUL_(I1, LI(10)), I2), NULL), NULL), NULL));
+}
+static AST_NODE *build_f8_nested3(void) { /* 2 x 2 x 2 průchodů */
+  return prog8(FT("i", 1, LI(1), LI(2),
+                  FT("j", 2, LI(1), LI(2), FT("k", 3, LI(1), LI(2), PS("x", NULL), NULL), NULL),
+                  NULL));
+}
+static AST_NODE *build_f8_nested_dep(void) { /* vnitřní mez závisí na vnější proměnné: j <- 1 to i */
+  return prog8(FT("i", 1, LI(1), LI(3),
+                  FT("j", 2, LI(1), I1, P(I2, NULL), NULL), NULL));
+}
+static AST_NODE *build_f8_two_seq(void) { /* dva cykly za sebou: návěští ani DEFVAR se nesmí opakovat */
+  return prog8(FT("i", 1, LI(1), LI(2), PRI(NULL),
+                  FU("j", 2, LI(1), LI(3), P(I2, NULL), NULL)));
+}
+static AST_NODE *build_f8_same_name(void) { /* dva cykly se stejným jménem i, jiná čísla (1 a 2) */
+  return prog8(FT("i", 1, LI(1), LI(2), PRI(NULL),
+                  FT("i", 2, LI(1), LI(2), P(MUL_(UI("i", 2), LI(10)), NULL), NULL)));
+}
+
+/* --- krok --- */
+static AST_NODE *build_f8_step(void) { /* 1 to 10 by 3 = 1 4 7 10 (konec se bere) */
+  return prog8(FS("i", 1, LI(1), LI(10), LI(3), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_step_skip(void) { /* 1 to 10 by 4 = 1 5 9 (10 se nezastaví) */
+  return prog8(FS("i", 1, LI(1), LI(10), LI(4), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_step_over(void) { /* krok větší než rozsah: jen první hodnota */
+  return prog8(FS("i", 1, LI(1), LI(3), LI(10), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_step_expr(void) { /* by 1 + 2 */
+  return prog8(FS("i", 1, LI(0), LI(8), PLUS(LI(1), LI(2)), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_step_var(void) { /* val s = 2; for i <- 1 to 7 by s */
+  return prog8(vdef("s", 10, true, I, LI(2),
+                    FS("i", 1, LI(1), LI(7), UI("s", 10), PRI(NULL), NULL)));
+}
+static AST_NODE *build_f8_step_once(void) { /* krok se čte jednou: s se v těle mění, ale krok zůstává 1 */
+  return prog8(vdef("s", 10, false, I, LI(1),
+                    FS("i", 1, LI(1), LI(9), UI("s", 10),
+                       P(I1, assign(UI("s", 10), PLUS(UI("s", 10), LI(1)), NULL)), NULL)));
+}
+static AST_NODE *build_f8_bounds_once(void) { /* mez se čte jednou: n se v těle zvětšuje, cyklus běží do 3 */
+  return prog8(vdef("n", 10, false, I, LI(3),
+                    FT("i", 1, LI(1), UI("n", 10),
+                       P(I1, assign(UI("n", 10), PLUS(UI("n", 10), LI(1)), NULL)),
+                       P(UI("n", 10), NULL))));
+}
+static AST_NODE *build_f8_zero_var(void) { /* var s = 0; for i <- 1 to 3 by s: chyba 40, "a" se ještě vypíše */
+  return prog8(PS("a", vdef("s", 10, false, I, LI(0),
+                            FS("i", 1, LI(1), LI(3), UI("s", 10), PRI(NULL), PS("b", NULL)))));
+}
+static AST_NODE *build_f8_zero_expr(void) { /* krok s - 1 s s = 1 je nula */
+  return prog8(vdef("s", 10, false, I, LI(1),
+                    FS("i", 1, LI(1), LI(3), bin(OP_SUB, UI("s", 10), LI(1), I), PRI(NULL), NULL)));
+}
+static AST_NODE *build_f8_zero_empty(void) { /* i když se tělo nespustí (5 to 3), nulový krok je chyba */
+  return prog8(vdef("s", 10, false, I, LI(0),
+                    FS("i", 1, LI(5), LI(3), UI("s", 10), PS("x", NULL), NULL)));
+}
+
+
+/* --- stráže (if za generátorem; více stráží se skládá jako "a zároveň") --- */
+static AST_NODE *build_f8_guard_one(void) { /* if i > 2 */
+  return prog8(FG("i", 1, LI(1), LI(6), GT_(I1, LI(2)), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_two(void) { /* if i > 2, if i < 5 */
+  return prog8(FG("i", 1, LI(1), LI(6), two_guards(GT_(I1, LI(2)), LT_(I1, LI(5))), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_none(void) { /* if false: tělo se nespustí, cyklus ale doběhne */
+  return prog8(FG("i", 1, LI(1), LI(3), lit_b(false), PS("x", NULL), PS(".", NULL)));
+}
+static AST_NODE *build_f8_guard_last(void) { /* stráž neplatí až pro poslední hodnotu */
+  return prog8(FG("i", 1, LI(1), LI(5), LT_(I1, LI(5)), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_and(void) { /* if i > 1 && i < 4 (zkrat z BOOLTHEN ve stráži) */
+  return prog8(FG("i", 1, LI(1), LI(5), bin(OP_AND, GT_(I1, LI(1)), LT_(I1, LI(4)), B), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_or(void) { /* if i == 2 || i == 4 */
+  return prog8(FG("i", 1, LI(1), LI(5), bin(OP_OR, EQ_(I1, LI(2)), EQ_(I1, LI(4)), B), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_var(void) { /* val skip = 3; if i != skip */
+  return prog8(vdef("skip", 10, true, I, LI(3),
+                    FG("i", 1, LI(1), LI(5), NEQ_(I1, UI("skip", 10)), PRI(NULL), NULL)));
+}
+static AST_NODE *build_f8_guard_step(void) { /* for i <- 1 to 10 by 2 if i > 4 */
+  return prog8(for_stmt("i", 1, LI(1), LI(10), LI(2), true, GT_(I1, LI(4)), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_spec(void) { /* příklad ze zadání: 0 until 10, if i != 3, if i < 8 */
+  return prog8(for_stmt("i", 1, LI(0), LI(10), NULL, false,
+                        two_guards(NEQ_(I1, LI(3)), LT_(I1, LI(8))), PRI(NULL), NULL));
+}
+static AST_NODE *build_f8_guard_call(void) { /* stráž je volání funkce, která při každém zavolání vypíše g */
+  AST_NODE *ok = fdef("ok", B, par("x", 1, I, NULL), PS("g", flast(lit_b(true), NULL)), NULL);
+  return make_program(main_fn(
+      FG("i", 10, LI(1), LI(2), fcall("ok", UI("i", 10), B), P(UI("i", 10), NULL), NULL), ok));
+}
+
+/* --- cyklus ve funkcích --- */
+static AST_NODE *build_f8_func_sum(void) { /* def sum(n): Int = { var s = 0; for i <- 1 to n do s = s + i; s } */
+  AST_NODE *sum = fdef("sum", I, par("n", 1, I, NULL),
+                       vdef("s", 2, false, I, LI(0),
+                            FT("i", 3, LI(1), UI("n", 1),
+                               assign(UI("s", 2), PLUS(UI("s", 2), UI("i", 3)), NULL),
+                               flast(UI("s", 2), NULL))),
+                       NULL);
+  return make_program(main_fn(
+      P(fcall("sum", LI(4), I), PS(",", P(fcall("sum", LI(3), I), NULL))), sum));
+}
+static AST_NODE *build_f8_func_last_for(void) { /* Unit funkce, jejíž poslední příkaz je for */
+  AST_NODE *show = fdef("show", U, par("n", 1, I, NULL),
+                        FT("i", 2, LI(1), UI("n", 1), P(UI("i", 2), NULL), NULL), NULL);
+  return make_program(main_fn(
+      fcall_stmt(fcall("show", LI(2), U), PS("|", fcall_stmt(fcall("show", LI(3), U), NULL))), show));
+}
+static AST_NODE *build_f8_return_in_for(void) { /* return uprostřed cyklu: na zásobníku nesmí nic zůstat */
+  AST_NODE *find = fdef("find", I, par("n", 1, I, NULL),
+                        FT("i", 2, LI(1), LI(10),
+                           if_stmt(EQ_(UI("i", 2), UI("n", 1)), fret(MUL_(UI("i", 2), LI(100)), NULL),
+                                   NULL, NULL),
+                           flast(LI(0), NULL)),
+                        NULL);
+  return make_program(main_fn(
+      P(fcall("find", LI(3), I), PS(",", P(fcall("find", LI(20), I), NULL))), find));
+}
+
+/* --- if jako výraz (val a = if cond then x else y) --- */
+#define E(e) flast((e), NULL) /* větev z jediného výrazu */
+static AST_NODE *ife(AST_NODE *cond, AST_NODE *then, AST_NODE *els, DATA_TYPE t) {
+  AST_NODE *n = ast_if_create(cond, then, els, NULL);
+  n->data_type = t;
+  return n;
+}
+static AST_NODE *build_f8_ife_true(void) { /* val a = if true then 1 else 2 */
+  return prog8(vdef("a", 10, true, I, ife(lit_b(true), E(LI(1)), E(LI(2)), I), P(UI("a", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_false(void) {
+  return prog8(vdef("a", 10, true, I, ife(lit_b(false), E(LI(1)), E(LI(2)), I), P(UI("a", 10), NULL)));
+}
+static AST_NODE *abs_prog(long long xv) { /* příklad ze zadání: val abs = if x < 0 then 0 - x else x */
+  return prog8(vdef("x", 10, false, I, LI(xv),
+                    vdef("abs", 11, true, I,
+                         ife(LT_(UI("x", 10), LI(0)), E(bin(OP_SUB, LI(0), UI("x", 10), I)), E(UI("x", 10)), I),
+                         P(UI("abs", 11), NULL))));
+}
+static AST_NODE *build_f8_ife_abs_neg(void) { return abs_prog(-5); }
+static AST_NODE *build_f8_ife_abs_pos(void) { return abs_prog(7); }
+static AST_NODE *build_f8_ife_arg(void) { /* print(if x > 0 then 1 else 2): if jako argument */
+  return prog8(vdef("x", 10, false, I, LI(3),
+                    P(ife(GT_(UI("x", 10), LI(0)), E(LI(1)), E(LI(2)), I), NULL)));
+}
+static AST_NODE *build_f8_ife_str(void) { /* větve typu String */
+  return prog8(vdef("s", 10, true, DATA_STRING, ife(lit_b(true), E(lit_s("yes")), E(lit_s("no")), DATA_STRING),
+                    P(UI("s", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_bool(void) { /* větve typu Boolean */
+  return prog8(vdef("x", 10, false, I, LI(3),
+                    vdef("b", 11, true, B, ife(GT_(UI("x", 10), LI(0)), E(lit_b(true)), E(lit_b(false)), B),
+                         P(UI("b", 11), NULL))));
+}
+static AST_NODE *build_f8_ife_double(void) { /* větve typu Double */
+  return prog8(vdef("d", 10, true, DATA_DOUBLE, ife(lit_b(true), E(lit_d(1.5)), E(lit_d(2.5)), DATA_DOUBLE),
+                    P(UI("d", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_mixed(void) { /* then Int, else Double: výsledek Double, 1 se převede na 1.0 */
+  return prog8(vdef("d", 10, true, DATA_DOUBLE, ife(lit_b(true), E(LI(1)), E(lit_d(2.5)), DATA_DOUBLE),
+                    P(UI("d", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_mixed_else(void) { /* totéž, vybere se else větev (Double) */
+  return prog8(vdef("d", 10, true, DATA_DOUBLE, ife(lit_b(false), E(LI(1)), E(lit_d(2.5)), DATA_DOUBLE),
+                    P(UI("d", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_mixed_rev(void) { /* then Double, else Int: else větev se převede na Double */
+  return prog8(vdef("d", 10, true, DATA_DOUBLE, ife(lit_b(false), E(lit_d(2.5)), E(LI(1)), DATA_DOUBLE),
+                    P(UI("d", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_multi(void) { /* v then větvi je víc příkazů: print("a"), pak hodnota 1 */
+  return prog8(vdef("r", 10, true, I, ife(lit_b(true), PS("a", E(LI(1))), PS("b", E(LI(2))), I),
+                    P(UI("r", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_multi_else(void) {
+  return prog8(vdef("r", 10, true, I, ife(lit_b(false), PS("a", E(LI(1))), PS("b", E(LI(2))), I),
+                    P(UI("r", 10), NULL)));
+}
+static AST_NODE *elseif_prog(long long xv) { /* if x < 0 then 0 else if x == 0 then 1 else 2 */
+  return prog8(vdef("x", 10, false, I, LI(xv),
+                    vdef("r", 11, true, I,
+                         ife(LT_(UI("x", 10), LI(0)), E(LI(0)),
+                             ife(EQ_(UI("x", 10), LI(0)), E(LI(1)), E(LI(2)), I), I),
+                         P(UI("r", 11), NULL))));
+}
+static AST_NODE *build_f8_ife_elseif_first(void) { return elseif_prog(-1); }
+static AST_NODE *build_f8_ife_elseif_mid(void) { return elseif_prog(0); }
+static AST_NODE *build_f8_ife_elseif_last(void) { return elseif_prog(5); }
+static AST_NODE *build_f8_ife_operand(void) { /* (if x > 0 then x else 0) + 10 */
+  return prog8(vdef("x", 10, false, I, LI(3),
+                    P(PLUS(ife(GT_(UI("x", 10), LI(0)), E(UI("x", 10)), E(LI(0)), I), LI(10)), NULL)));
+}
+static AST_NODE *build_f8_ife_operand_r(void) { /* 100 + if x > 0 then x else 0 (if jako pravý operand) */
+  return prog8(vdef("x", 10, false, I, LI(3),
+                    P(PLUS(LI(100), ife(GT_(UI("x", 10), LI(0)), E(UI("x", 10)), E(LI(0)), I)), NULL)));
+}
+static AST_NODE *build_f8_ife_nested(void) { /* if true then (if false then 1 else 2) else 3 */
+  return prog8(vdef("r", 10, true, I,
+                    ife(lit_b(true), ife(lit_b(false), E(LI(1)), E(LI(2)), I), E(LI(3)), I),
+                    P(UI("r", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_assign(void) { /* y = if x > 0 then 1 else 2 jako přiřazení */
+  return prog8(vdef("x", 10, false, I, LI(3),
+                    vdef("y", 11, false, I, LI(0),
+                         assign(UI("y", 11), ife(GT_(UI("x", 10), LI(0)), E(LI(1)), E(LI(2)), I),
+                                P(UI("y", 11), NULL)))));
+}
+static AST_NODE *build_f8_ife_two(void) { /* dva if výrazy v jedné funkci: návěští se nesmí opakovat */
+  return prog8(vdef("a", 10, true, I, ife(lit_b(true), E(LI(1)), E(LI(2)), I),
+                    vdef("b", 11, true, I, ife(lit_b(false), E(LI(3)), E(LI(4)), I),
+                         P(UI("a", 10), P(UI("b", 11), NULL)))));
+}
+static AST_NODE *build_f8_ife_branch_var(void) { /* ve větvi je val t = 5 (DEFVAR musí být nahoře) */
+  return prog8(vdef("r", 10, true, I,
+                    ife(lit_b(true), vdef("t", 11, true, I, LI(5), E(PLUS(UI("t", 11), LI(1)))), E(LI(0)), I),
+                    P(UI("r", 10), NULL)));
+}
+static AST_NODE *build_f8_ife_in_for(void) { /* for i <- 1 to 3 do print(if i > 2 then 1 else 0) */
+  return prog8(FT("i", 1, LI(1), LI(4),
+                  P(ife(GT_(I1, LI(2)), E(LI(1)), E(LI(0)), I), NULL), NULL));
+}
+static AST_NODE *build_f8_ife_for_val(void) { /* uvnitř těla: val r = if i == 2 then 20 else i */
+  return prog8(FT("i", 1, LI(1), LI(3),
+                  vdef("r", 10, true, I, ife(EQ_(I1, LI(2)), E(LI(20)), E(I1), I), P(UI("r", 10), NULL)),
+                  NULL));
+}
+static AST_NODE *build_f8_ife_tail(void) { /* def sign(x): Int = if x < 0 then -1 else 1 (if je poslední příkaz funkce) */
+  AST_NODE *sign = fdef("sign", I, par("x", 1, I, NULL),
+                        ife(LT_(UI("x", 1), LI(0)), E(neg(LI(1), I)), E(LI(1)), I), NULL);
+  return make_program(main_fn(
+      P(fcall("sign", neg(LI(4), I), I), PS(",", P(fcall("sign", LI(4), I), NULL))), sign));
+}
+static AST_NODE *build_f8_ife_return(void) { /* return if x > 0 then 1 else 2 */
+  AST_NODE *pick = fdef("pick", I, par("x", 1, I, NULL),
+                        fret(ife(GT_(UI("x", 1), LI(0)), E(LI(1)), E(LI(2)), I), NULL), NULL);
+  return make_program(main_fn(
+      P(fcall("pick", LI(3), I), PS(",", P(fcall("pick", neg(LI(3), I), I), NULL))), pick));
+}
+static AST_NODE *side_int_fn(void) { /* def side(): Int = { print("S"); 1 } */
+  return fdef("side", I, NULL, PS("S", flast(LI(1), NULL)), NULL);
+}
+static AST_NODE *build_f8_ife_lazy(void) { /* if false then side() else 2: side() se nezavolá, nevypíše S */
+  return make_program(main_fn(
+      vdef("r", 10, true, I, ife(lit_b(false), E(fcall("side", NULL, I)), E(LI(2)), I), P(UI("r", 10), NULL)),
+      side_int_fn()));
+}
+static AST_NODE *build_f8_ife_lazy_run(void) { /* if true then side() else 2: side() se zavolá (S), pak hodnota 1 */
+  return make_program(main_fn(
+      vdef("r", 10, true, I, ife(lit_b(true), E(fcall("side", NULL, I)), E(LI(2)), I), P(UI("r", 10), NULL)),
+      side_int_fn()));
+}
+#undef E
+#undef LT_
+#undef GT_
+#undef EQ_
+#undef NEQ_
+#undef MUL_
+#undef PLUS
+#undef LI
+#undef I1
+#undef I2
+#undef FT
+#undef FU
+#undef FS
+#undef FG
+#undef PRI
+#undef PS
+#undef P
+#undef UI
+#undef I
+#undef B
+#undef U
+
 typedef struct {
   const char *name;
   int phase;
@@ -2196,6 +2600,79 @@ static const Case CASES[] = {
      "dva řádky false a true: a && b a a || b", "falsetrue", {NULL}, "false\ntrue\n", 0},
     {"f7_readbool_if", 7, "main", {NULL}, build_f7_readbool_if,
      "readBoolean() v podmínce if (přes proměnnou)", "yes", {NULL}, "true\n", 0},
+    {"f8_to", 8, "main", {NULL}, build_f8_to, "for i <- 1 to 3 do print(i)", "123", {"LF@i$1", NULL}, NULL, 0},
+    {"f8_until", 8, "main", {NULL}, build_f8_until, "for i <- 1 until 4: konec se nebere", "123", {NULL}, NULL, 0},
+    {"f8_to_once", 8, "main", {NULL}, build_f8_to_once, "5 to 5: jeden průchod", "5", {NULL}, NULL, 0},
+    {"f8_until_empty", 8, "main", {NULL}, build_f8_until_empty, "3 until 3: nic, cyklus se přeskočí a pokračuje se za ním", ".", {NULL}, NULL, 0},
+    {"f8_to_empty", 8, "main", {NULL}, build_f8_to_empty, "5 to 3: od je větší než do, tělo se nespustí", ".", {NULL}, NULL, 0},
+    {"f8_around", 8, "main", {NULL}, build_f8_around, "příkaz před cyklem a za ním", "<12>", {NULL}, NULL, 0},
+    {"f8_neg_lit", 8, "main", {NULL}, build_f8_neg_lit, "for i <- -2 to 2 (záporný začátek)", "-2-1012", {NULL}, NULL, 0},
+    {"f8_expr_bounds", 8, "main", {NULL}, build_f8_expr_bounds, "meze jsou výrazy: 1 + 1 to 2 * 2", "234", {NULL}, NULL, 0},
+    {"f8_var_bounds", 8, "main", {NULL}, build_f8_var_bounds, "meze jsou proměnné: val a = 3, val b = 5", "345", {NULL}, NULL, 0},
+    {"f8_empty_body", 8, "main", {NULL}, build_f8_empty_body, "prázdné tělo (right == NULL), za cyklem se pokračuje", "x", {NULL}, NULL, 0},
+    {"f8_big", 8, "main", {NULL}, build_f8_big, "součet 1 až 100 (sto průchodů)", "5050", {NULL}, NULL, 0},
+    {"f8_use_i", 8, "main", {NULL}, build_f8_use_i, "řídicí proměnná ve výrazu: print(i * i)", "14916", {NULL}, NULL, 0},
+    {"f8_sum", 8, "main", {NULL}, build_f8_sum, "var s = 0; for i <- 1 to 4 do s = s + i; print(s)", "10", {NULL}, NULL, 0},
+    {"f8_body_var", 8, "main", {NULL}, build_f8_body_var, "val d = i * 2 uvnitř těla (DEFVAR musí být nahoře)", "246", {"LF@i$1", "LF@d$10", NULL}, NULL, 0},
+    {"f8_if_inside", 8, "main", {NULL}, build_f8_if_inside, "if uvnitř těla cyklu: tiskne jen i > 2", "34", {NULL}, NULL, 0},
+    {"f8_while_inside", 8, "main", {NULL}, build_f8_while_inside, "while uvnitř for, v každém kole nové k = 0", "001", {NULL}, NULL, 0},
+    {"f8_in_while", 8, "main", {NULL}, build_f8_in_while, "for uvnitř while (vnější cyklus běží dvakrát)", "1212", {NULL}, NULL, 0},
+    {"f8_nested", 8, "main", {NULL}, build_f8_nested, "dva vnořené cykly, print(i * 10 + j)", "11122122", {"LF@i$1", "LF@j$2", NULL}, NULL, 0},
+    {"f8_nested3", 8, "main", {NULL}, build_f8_nested3, "tři vnořené cykly, 2 x 2 x 2 průchodů", "xxxxxxxx", {NULL}, NULL, 0},
+    {"f8_nested_dep", 8, "main", {NULL}, build_f8_nested_dep, "vnitřní mez závisí na vnější proměnné: j <- 1 to i", "112123", {NULL}, NULL, 0},
+    {"f8_two_seq", 8, "main", {NULL}, build_f8_two_seq, "dva cykly za sebou (návěští se nesmí opakovat)", "1212", {NULL}, NULL, 0},
+    {"f8_same_name", 8, "main", {NULL}, build_f8_same_name, "dva cykly se stejným jménem i a čísly 1 a 2", "121020", {"LF@i$1", "LF@i$2", NULL}, NULL, 0},
+    {"f8_step", 8, "main", {NULL}, build_f8_step, "1 to 10 by 3: konec se bere", "14710", {NULL}, NULL, 0},
+    {"f8_step_skip", 8, "main", {NULL}, build_f8_step_skip, "1 to 10 by 4: konec se přeskočí", "159", {NULL}, NULL, 0},
+    {"f8_step_over", 8, "main", {NULL}, build_f8_step_over, "krok větší než rozsah: jen první hodnota", "1", {NULL}, NULL, 0},
+    {"f8_step_expr", 8, "main", {NULL}, build_f8_step_expr, "krok je výraz: 0 to 8 by 1 + 2", "036", {NULL}, NULL, 0},
+    {"f8_step_var", 8, "main", {NULL}, build_f8_step_var, "krok je proměnná: val s = 2, 1 to 7 by s", "1357", {NULL}, NULL, 0},
+    {"f8_step_once", 8, "main", {NULL}, build_f8_step_once, "krok se vyhodnotí jednou: s se v těle mění, krok zůstává 1", "123456789", {NULL}, NULL, 0},
+    {"f8_bounds_once", 8, "main", {NULL}, build_f8_bounds_once, "mez se vyhodnotí jednou: n se v těle zvětšuje, cyklus běží do 3 (pak n je 6)", "1236", {NULL}, NULL, 0},
+    {"f8_zero_var", 8, "main", {NULL}, build_f8_zero_var, "krok 0 z proměnné: chyba 40 za běhu", "a", {NULL}, NULL, 40},
+    {"f8_zero_expr", 8, "main", {NULL}, build_f8_zero_expr, "krok s - 1 je 0: chyba 40", "", {NULL}, NULL, 40},
+    {"f8_zero_empty", 8, "main", {NULL}, build_f8_zero_empty, "5 to 3 by 0: krok 0 je chyba i když by se tělo nespustilo", "", {NULL}, NULL, 40},
+    {"f8_guard_one", 8, "main", {NULL}, build_f8_guard_one, "stráž: for i <- 1 to 6 if i > 2", "3456", {NULL}, NULL, 0},
+    {"f8_guard_two", 8, "main", {NULL}, build_f8_guard_two, "dvě stráže (obě musí platit): if i > 2, if i < 5", "34", {NULL}, NULL, 0},
+    {"f8_guard_none", 8, "main", {NULL}, build_f8_guard_none, "stráž false: tělo se nespustí, cyklus doběhne", ".", {NULL}, NULL, 0},
+    {"f8_guard_last", 8, "main", {NULL}, build_f8_guard_last, "stráž neplatí až u poslední hodnoty", "1234", {NULL}, NULL, 0},
+    {"f8_guard_and", 8, "main", {NULL}, build_f8_guard_and, "stráž s &&: if i > 1 && i < 4", "23", {NULL}, NULL, 0},
+    {"f8_guard_or", 8, "main", {NULL}, build_f8_guard_or, "stráž s ||: if i == 2 || i == 4", "24", {NULL}, NULL, 0},
+    {"f8_guard_var", 8, "main", {NULL}, build_f8_guard_var, "stráž s proměnnou: if i != skip", "1245", {NULL}, NULL, 0},
+    {"f8_guard_step", 8, "main", {NULL}, build_f8_guard_step, "stráž a krok dohromady: 1 to 10 by 2 if i > 4", "579", {NULL}, NULL, 0},
+    {"f8_guard_spec", 8, "main", {NULL}, build_f8_guard_spec, "příklad ze zadání: 0 until 10, if i != 3, if i < 8", "0124567", {NULL}, NULL, 0},
+    {"f8_guard_call", 8, "main", {"ok", NULL}, build_f8_guard_call, "stráž je volání funkce (vypíše g při každém kole)", "g1g2", {NULL}, NULL, 0},
+    {"f8_func_sum", 8, "main", {"sum", NULL}, build_f8_func_sum, "def sum(n): Int s cyklem a posledním výrazem s", "10,6", {NULL}, NULL, 0},
+    {"f8_func_last_for", 8, "main", {"show", NULL}, build_f8_func_last_for, "Unit funkce končící cyklem for", "12|123", {NULL}, NULL, 0},
+    {"f8_return_in_for", 8, "main", {"find", NULL}, build_f8_return_in_for, "return uprostřed cyklu, na zásobníku nic nezůstane", "300,0", {NULL}, NULL, 0},
+    {"f8_ife_true", 8, "main", {NULL}, build_f8_ife_true, "val a = if true then 1 else 2", "1", {NULL}, NULL, 0},
+    {"f8_ife_false", 8, "main", {NULL}, build_f8_ife_false, "val a = if false then 1 else 2", "2", {NULL}, NULL, 0},
+    {"f8_ife_abs_neg", 8, "main", {NULL}, build_f8_ife_abs_neg, "příklad ze zadání: abs = if x < 0 then 0 - x else x, x = -5", "5", {NULL}, NULL, 0},
+    {"f8_ife_abs_pos", 8, "main", {NULL}, build_f8_ife_abs_pos, "totéž s x = 7 (vybere se else)", "7", {NULL}, NULL, 0},
+    {"f8_ife_arg", 8, "main", {NULL}, build_f8_ife_arg, "if jako argument: print(if x > 0 then 1 else 2)", "1", {NULL}, NULL, 0},
+    {"f8_ife_str", 8, "main", {NULL}, build_f8_ife_str, "větve typu String", "yes", {NULL}, NULL, 0},
+    {"f8_ife_bool", 8, "main", {NULL}, build_f8_ife_bool, "větve typu Boolean", "true", {NULL}, NULL, 0},
+    {"f8_ife_double", 8, "main", {NULL}, build_f8_ife_double, "větve typu Double: 1.5", "0x1.8p+0", {NULL}, NULL, 0},
+    {"f8_ife_mixed", 8, "main", {NULL}, build_f8_ife_mixed, "then je Int, else je Double: výsledek Double, 1 se převede na 1.0", "0x1p+0", {NULL}, NULL, 0},
+    {"f8_ife_mixed_else", 8, "main", {NULL}, build_f8_ife_mixed_else, "totéž, vybere se else větev 2.5", "0x1.4p+1", {NULL}, NULL, 0},
+    {"f8_ife_mixed_rev", 8, "main", {NULL}, build_f8_ife_mixed_rev, "then je Double, else je Int: else větev 1 se převede na 1.0", "0x1p+0", {NULL}, NULL, 0},
+    {"f8_ife_multi", 8, "main", {NULL}, build_f8_ife_multi, "ve větvi víc příkazů: print(a) a pak hodnota 1", "a1", {NULL}, NULL, 0},
+    {"f8_ife_multi_else", 8, "main", {NULL}, build_f8_ife_multi_else, "totéž, vybere se else: print(b) a hodnota 2", "b2", {NULL}, NULL, 0},
+    {"f8_ife_elseif_first", 8, "main", {NULL}, build_f8_ife_elseif_first, "else if: x = -1, platí první podmínka", "0", {NULL}, NULL, 0},
+    {"f8_ife_elseif_mid", 8, "main", {NULL}, build_f8_ife_elseif_mid, "else if: x = 0, platí druhá podmínka", "1", {NULL}, NULL, 0},
+    {"f8_ife_elseif_last", 8, "main", {NULL}, build_f8_ife_elseif_last, "else if: x = 5, platí poslední else", "2", {NULL}, NULL, 0},
+    {"f8_ife_operand", 8, "main", {NULL}, build_f8_ife_operand, "if jako levý operand: (if x > 0 then x else 0) + 10", "13", {NULL}, NULL, 0},
+    {"f8_ife_operand_r", 8, "main", {NULL}, build_f8_ife_operand_r, "if jako pravý operand: 100 + if x > 0 then x else 0", "103", {NULL}, NULL, 0},
+    {"f8_ife_nested", 8, "main", {NULL}, build_f8_ife_nested, "if true then (if false then 1 else 2) else 3", "2", {NULL}, NULL, 0},
+    {"f8_ife_assign", 8, "main", {NULL}, build_f8_ife_assign, "y = if x > 0 then 1 else 2 jako přiřazení", "1", {NULL}, NULL, 0},
+    {"f8_ife_two", 8, "main", {NULL}, build_f8_ife_two, "dva if výrazy v jedné funkci (návěští se nesmí opakovat)", "14", {NULL}, NULL, 0},
+    {"f8_ife_branch_var", 8, "main", {NULL}, build_f8_ife_branch_var, "ve větvi val t = 5 (DEFVAR musí být nahoře)", "6", {"LF@t$11", NULL}, NULL, 0},
+    {"f8_ife_in_for", 8, "main", {NULL}, build_f8_ife_in_for, "if výraz v těle cyklu: print(if i > 2 then 1 else 0)", "0011", {NULL}, NULL, 0},
+    {"f8_ife_for_val", 8, "main", {NULL}, build_f8_ife_for_val, "val r = if i == 2 then 20 else i uvnitř těla for", "1203", {NULL}, NULL, 0},
+    {"f8_ife_tail", 8, "main", {"sign", NULL}, build_f8_ife_tail, "def sign(x): Int = if ... (if je poslední příkaz funkce)", "-1,1", {NULL}, NULL, 0},
+    {"f8_ife_return", 8, "main", {"pick", NULL}, build_f8_ife_return, "return if x > 0 then 1 else 2", "1,2", {NULL}, NULL, 0},
+    {"f8_ife_lazy", 8, "main", {"side", NULL}, build_f8_ife_lazy, "vyhodnotí se jen vybraná větev: if false then side() else 2 nevypíše S", "2", {NULL}, NULL, 0},
+    {"f8_ife_lazy_run", 8, "main", {"side", NULL}, build_f8_ife_lazy_run, "vybraná větev se vyhodnotí: if true then side() else 2 vypíše S", "S1", {NULL}, NULL, 0},
 };
 #define N_CASES (sizeof CASES / sizeof CASES[0])
 
@@ -2360,7 +2837,7 @@ typedef struct {
   int nret;
   char *out;
   size_t outn, outcap;
-  void *mem[4096];
+  void *mem[150000]; /* 100000 instrukcí = nejvýš tolik alokací */
   int nmem;
   char err[300];
   int exit_code;
@@ -2369,9 +2846,14 @@ typedef struct {
   char rt_msg[300]; /* běhová chyba interpretu (kód 57 nebo 58): program skončí s tímto kódem */
 } Vm;
 
+static void vm_fail(Vm *vm, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void *vm_alloc(Vm *vm, size_t n) {
   void *p = calloc(1, n ? n : 1);
-  if (!p || vm->nmem >= 4096) exit(99);
+  if (!p) exit(99);
+  if (vm->nmem >= 150000) { /* program se zacyklil a jen žere paměť: ukončit ho jako chybu, ne celý test */
+    vm_fail(vm, "program se zacyklil (spotřeboval příliš paměti)");
+    return p; /* nepoznačeno k uvolnění, ale simulace hned skončí */
+  }
   vm->mem[vm->nmem++] = p;
   return p;
 }
@@ -2728,6 +3210,7 @@ static void vm_run(Vm *vm, char **lines, int n) {
 
   int pc = 1;
   for (int steps = 0; pc < n; steps++) {
+    if (vm->err[0]) return;
     if (steps > 100000) {
       vm_fail(vm, "program se zacyklil (víc než 100000 instrukcí)");
       return;
@@ -3659,11 +4142,11 @@ int main(int argc, char **argv) {
   const char *interp = find_interpreter(interp_buf, sizeof interp_buf, &explicit_env);
 
   int total_ok = 0, total_bad = 0, ran = 0;
-  int phase_ok[8] = {0}, phase_bad[8] = {0};
-  static const char *const PHASE_NAME[8] = {"kostra programu a funkcí", "konstanty a print",
+  int phase_ok[9] = {0}, phase_bad[9] = {0};
+  static const char *const PHASE_NAME[9] = {"kostra programu a funkcí", "konstanty a print",
                                            "výrazy", "proměnné", "if a while", "funkce",
-                                           "vestavěné funkce", "rozšíření BOOLTHEN"};
-  for (int phase = 0; phase <= 7; phase++) {
+                                           "vestavěné funkce", "rozšíření BOOLTHEN", "rozšíření CONTROL (cyklus for)"};
+  for (int phase = 0; phase <= 8; phase++) {
     bool header = false;
     for (size_t i = 0; i < N_CASES; i++) {
       if (CASES[i].phase != phase || !selected(&CASES[i], only)) continue;
@@ -3682,14 +4165,14 @@ int main(int argc, char **argv) {
     }
   }
   if (ran == 0) {
-    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7 a", only);
+    printf("neznámý případ \"%s\". Dostupné: f0, f1, f2, f3, f4, f5, f6, f7, f8 a", only);
     for (size_t i = 0; i < N_CASES; i++) printf(" %s", CASES[i].name);
     printf("\n");
     return 2;
   }
 
   printf("== Výsledek: OK %d, chyby %d", total_ok, total_bad);
-  for (int phase = 0; phase <= 7; phase++)
+  for (int phase = 0; phase <= 8; phase++)
     if (phase_ok[phase] + phase_bad[phase] > 0)
       printf("   (fáze %d: %d/%d)", phase, phase_ok[phase], phase_ok[phase] + phase_bad[phase]);
   printf("\n");

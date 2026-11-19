@@ -48,7 +48,7 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
 
       //else
       printf("LABEL IF$%d$ELSE\n",if_id);
-      gen_block(gen, node->third);
+      gen_block(gen,node->third);
 
       //end
       printf("LABEL IF$%d$END\n",if_id);
@@ -81,6 +81,57 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
         printf("RETURN\n");
       }
       break;
+
+    case NODE_FOR: {
+      AST_NODE *range = node->left;
+
+      //assign variables
+      gen_expr(gen, range->left);
+      printf("POPS LF@%s$%d\n",node->name,node->id);
+
+      gen_expr(gen, range->right);
+      printf("POPS LF@for_end$%d\n",node->id);
+
+      if (range->third) {
+        gen_expr(gen, range->third);
+        printf("POPS LF@for_step$%d\n",node->id);
+      }
+      else printf("MOVE LF@for_step$%d int@1\n",node->id);
+
+      printf("LABEL for$%d\n",node->id);
+
+      //zero range condition
+      printf("JUMPIFNEQ STEP$OK$%d LF@for_step$%d int@0\n", node->id, node->id);
+      printf("EXIT int@40\n");
+      printf("LABEL STEP$OK$%d\n", node->id);
+
+
+
+      if (range->inclusive) {
+        printf("GT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
+        printf("JUMPIFEQ for$%d$END LF@tmp1 bool@true\n", node->id);
+      }
+      else {
+        printf("LT LF@tmp1 LF@%s$%d LF@for_end$%d\n", node->name, node->id, node->id);
+        printf("JUMPIFEQ for$%d$END LF@tmp1 bool@false\n", node->id);
+      }
+
+      //guards
+      for (AST_NODE *guard = node->third; guard != NULL; guard = guard->next) {
+        gen_expr(gen, guard);
+        printf("PUSHS bool@false\n");
+        printf("JUMPIFEQS for$%d$NEXT\n",node->id);
+      }
+      gen_block(gen, node->right);
+
+      printf("LABEL for$%d$NEXT\n",node->id);
+      //i++
+      printf("ADD LF@%s$%d LF@%s$%d LF@for_step$%d\n", node->name, node->id, node->name, node->id, node->id);
+      printf("JUMP for$%d\n", node->id);
+
+      printf("LABEL for$%d$END\n",node->id);
+      break;
+    }
     default:
       break;
   }

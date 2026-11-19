@@ -14,6 +14,7 @@
 
 #include "ast.h"
 #include "gen_internal.h"
+#include "generator.h"
 //===========================
 // puts one value on stack
 //===========================
@@ -212,8 +213,75 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       }
       break;
 
+    case NODE_IF: {
+      int i = new_label(gen);
+
+      //if
+      gen_expr(gen, node->left);
+      printf("PUSHS bool@false\n");
+      printf("JUMPIFEQS xIF$%d$ELSE\n", i);
+
+      //then
+      for (AST_NODE *fn = node->right; fn != NULL; fn = fn->next) {
+        if (fn->next==NULL && node->data_type != DATA_UNIT) {
+          if (fn->type== NODE_IF) {
+            gen_expr(gen, fn);
+            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+          else if (fn->type==NODE_RETURN) {
+            gen_stmt(gen, fn);
+            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+          else {
+            gen_expr(gen,fn->left);
+            if (node->data_type==DATA_DOUBLE && fn->left->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+        }
+        else {
+          gen_stmt(gen, fn);
+        }
+      }
+
+      printf("JUMP xIF$%d$END\n", i);
+
+      //else
+      printf("LABEL xIF$%d$ELSE\n", i);
+      for (AST_NODE *fn = node->third; fn != NULL; fn = fn->next) {
+        if (fn->next==NULL && node->data_type != DATA_UNIT) {
+          if (fn->type== NODE_IF) {
+            gen_expr(gen, fn);
+            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+          else if (fn->type==NODE_RETURN) {
+            gen_stmt(gen, fn);
+            if (node->data_type==DATA_DOUBLE && fn->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+          else {
+            gen_expr(gen,fn->left);
+            if (node->data_type==DATA_DOUBLE && fn->left->data_type==DATA_INT) {
+              printf("INT2FLOATS\n");
+            }
+          }
+        }
+        else {
+          gen_stmt(gen, fn);
+        }
+      }
+      printf("LABEL xIF$%d$END\n", i);
+      break;
+    }
+
     default:
       break;
   }
 }
-

@@ -240,7 +240,10 @@ AST_NODE *ast_for_create(AST_NODE *range, AST_NODE *body, AST_NODE *guards, AST_
 /*             FOR ---next--->
  *          /   |    \
  *         /    |     \
- *     range  guards  body
+ *     range  body   guards
+ *    /  |  \
+ *   /   |   \
+ * from  to  step
  */
 
 AST_NODE *ast_range_create(AST_NODE *from, AST_NODE *to, AST_NODE *step, AST_NODE *next, bool inclusive);
