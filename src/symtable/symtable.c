@@ -7,7 +7,6 @@ Part of project IFJ2026
 #include "symtable.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include "scanner/error.h"
 
 #define SYMTABLE_BASE_SIZE 100
@@ -92,7 +91,7 @@ bool symtableExists(symtable_t * table){
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//functions for inserting, searching, and deleting items in the symbol table
+//functions for inserting and searching items in the symbol table
 void * symtableSearch(symtable_t * table, const char * key) {
     size_t index = symtableFindIndex(table, key);
     if (index == (size_t)-1) {
@@ -156,50 +155,3 @@ size_t symtableFindIndex(symtable_t * table, const char * key){
     } while (i != start);
     return (size_t)-1; //did not find the key in the table
 }
-
-bool symtableDelete(symtable_t * table, const char * key){
-    size_t index = symtableFindIndex(table, key);
-    if (index != (size_t)-1) {
-            free(table->items[index].key);
-            table->items[index].status = SLOT_DELETED;
-            table->count--;
-            return true; //successfully deleted the item
-        }
-    return false; //did not find the key in the table
-    }
-
-void * symtableGetOrInsert(symtable_t * table, const char * key, void * value) {
-    size_t index = symtableFindIndex(table, key);
-    if (index != (size_t)-1) {
-        return table->items[index].value;
-    }
-    if (!symtableInsert(table, key, value)) {
-        return NULL;
-    }
-    return value;
-}
-
-void symtableUpdateValue(symtable_t * table, const char * key, void * new_value){
-    size_t i = symtableFindIndex(table, key);
-    if (i != (size_t)-1) {
-        table->items[i].value = new_value;
-    }
-}
-size_t symtableSize(symtable_t * table){
-    if (!symtableExists(table)) return 0;
-    return table->count;
-}
-
-void symtablePrint(symtable_t * table){
-    if (symtableExists(table) == false) {
-        printf("Symbol table does not exist.\n");
-        return;
-    }
-    printf("Symbol Table Size: %zu, Count: %zu\n, Table load: %.2f\n", table->size, table->count, (double)table->count / table->size);
-    printf("Symbol Table Contents:\n");
-    for (size_t i = 0; i < table->size; i++) {
-        if (table->items[i].status == SLOT_OCCUPIED) {
-            printf("Index: %zu, Key: %s, Value: %p, Insert Order: %zu\n", i, table->items[i].key, table->items[i].value, table->items[i].insert_order);
-        }
-    }
-} //prints the contents of the symbol table, purely for debugging

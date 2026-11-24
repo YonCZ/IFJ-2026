@@ -29,6 +29,7 @@ void lower_members(AST_NODE *root) {
     if (fn->left)lower_members(fn->left);
     if (fn->right)lower_members(fn->right);
     if (fn->third)lower_members(fn->third);
+    if (fn->arg_groups)lower_members(fn->arg_groups);
 
 
     if (fn->type == NODE_CALL && fn->is_method == true && fn->third == NULL && fn->left) {
@@ -76,14 +77,27 @@ int new_label(Gen *gen) {
 }
 
 //writes definition of variables in function right after pushFrame
+static int match_id_counter;
+
 void print_defvar(AST_NODE *node, Gen *gen) {
   if (node->type==NODE_VAR_DEF) {
     printf("DEFVAR LF@%s$%d\n", node->name,node->id);
+  }
+  if (node->type==NODE_IDENT && node->is_binding) {
+    printf("DEFVAR LF@%s$%d\n", node->name, node->id);
+  }
+  if (node->type==NODE_MATCH) {
+    if (node->field_index == 0) {
+      node->field_index = ++match_id_counter;
+    }
+    printf("DEFVAR LF@match$%d\n", node->field_index);
   }
   if (node->type==NODE_FOR) {
     printf("DEFVAR LF@%s$%d\n", node->name,node->id);
     printf("DEFVAR LF@for_end$%d\n",node->id);
     printf("DEFVAR LF@for_step$%d\n",node->id);
+    printf("DEFVAR LF@for_list$%d\n",node->id);
+    printf("DEFVAR LF@for_idx$%d\n",node->id);
   }
 }
 void emit_defvars(Gen *gen, AST_NODE *node) {
@@ -103,6 +117,10 @@ void emit_defvars(Gen *gen, AST_NODE *node) {
   if (node->next!=NULL) {
     print_defvar(node->next, gen);
     emit_defvars(gen,node->next);
+  }
+  if (node->arg_groups != NULL) {
+    print_defvar(node->arg_groups, gen);
+    emit_defvars(gen, node->arg_groups);
   }
 }
 
@@ -229,7 +247,9 @@ void generator_init(Gen *gen, AST_NODE *root) {
   //emits all functions
   n = root->left;
   while (n) {
-    gen_function(gen,n);
+    if (n->type == NODE_FUNC_DEF) {
+      gen_function(gen,n);
+    }
     n = n->next;
   }
 }

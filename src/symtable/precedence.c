@@ -114,11 +114,13 @@ static PSASymbol token_to_symbol(Token token, bool expecting_operand) {
         case EOF_TOKEN:
             return PSA_DOLLAR;
         default:
+            // Pokud token není platný operand výrazu, skončíme chybou.
             error_exit(ERROR_SYN, token.line, "Invalid token in precedence expression");
             return PSA_DOLLAR;
     }
 }
 
+// Vytvoří list AST podle typu tokenu.
 static AST_NODE *create_leaf(Token token) {
     AST_NODE *node;
 
@@ -153,16 +155,18 @@ static AST_NODE *create_leaf(Token token) {
             return NULL;
     }
 
-    node->line = token.line;
+    node->line = token.line; // Uložíme řádek kvůli hlášením chyb.
     return node;
 }
 
+// Ověří, zda je symbol unární operátor.
 static bool is_unary_symbol(PSASymbol symbol) {
     return symbol == PSA_UN_PLUS ||
            symbol == PSA_UN_MINUS ||
            symbol == PSA_UN_NOT;
 }
 
+// Převede symbol PSA na operátor OP_TYPE.
 static bool symbol_to_operator(PSASymbol symbol, OP_TYPE *operator) {
     switch (symbol) {
         case PSA_PLUS: *operator = OP_ADD; return true;
@@ -185,6 +189,7 @@ static bool symbol_to_operator(PSASymbol symbol, OP_TYPE *operator) {
     }
 }
 
+// Vrátí operátor pro unární symbol.
 static OP_TYPE unary_operator(PSASymbol symbol) {
     switch (symbol) {
         case PSA_UN_PLUS: return OP_ADD;
@@ -200,11 +205,11 @@ static void reduce_stack(Stack *stack, int line) {
     StackSymbol symbol;
     bool marker_found = false;
 
-    //the actual reducing function
-
+    // Provede redukci podle pravidla na vrcholu zásobníku.
     while (!stack_is_empty(stack)) {
         symbol = stack_pop(stack);
         if (symbol.kind == STACK_MARKER) {
+            // Marker ukončuje pravidlo, na které se redukce aplikuje.
             marker_found = true;
             break;
         }
@@ -216,6 +221,7 @@ static void reduce_stack(Stack *stack, int line) {
     }
 
     if (!marker_found) {
+        // Bez markeru je výraz neplatný.
         error_exit(ERROR_SYN, line, "Missing precedence marker");
         return;
     }
@@ -313,6 +319,7 @@ static int count_arg_chain(AST_NODE *arg) {
     return count;
 }
 
+// Zpracuje argumenty volání oddělené čárkou, čárka na konci je povolená jen před zalomením řádku.
 static AST_NODE *parse_call_args(void) {
     expect_token(LPAR_TOKEN);
     if (parser_peek().type == RPAR_TOKEN) {
@@ -345,6 +352,7 @@ static AST_NODE *parse_call_args(void) {
     }
 }
 
+// Zpracuje výraz podle precedenční tabulky a staví AST na zásobníku.
 static AST_NODE *precedence_parse_internal(bool in_args) {
     Token input = parser_peek();
     Stack *stack = stack_init();
@@ -358,6 +366,7 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
     });
 
     while (true) {
+        // Odsazené zalomení řádku může pokračovat ve výrazu, pokud ještě čekáme operand.
         if (input.type == EOL_TOKEN && expecting_operand) {
             input = consume_continuation(input);
             continue;
@@ -413,6 +422,7 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
             continue;
         }
 
+        // Závorka za operandem je volání funkce, ne seskupení výrazu.
         if (!expecting_operand && input.type == LPAR_TOKEN) {
             AST_NODE *callee = pop_postfix_operand(stack, input.line);
             AST_NODE *params = parse_call_args();
@@ -425,7 +435,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
                 callee->third = params;
                 callee->has_parens = true;
                 call = callee;
-            } else if (callee->type == NODE_CALL && !callee->is_method) {
+            } else if (callee->type == NODE_CALL &&
+                       (!callee->is_method || callee->has_parens)) {
                 AST_NODE *group = ast_create_param_list(params, NULL,
                                                         count_arg_chain(params));
                 if (callee->arg_groups == NULL) {
@@ -445,8 +456,10 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
                 callee->has_parens = true;
                 call = callee;
             } else {
-                error_exit(ERROR_SYN, input.line,
-                           "expression is not callable");
+                call = ast_create(callee, NULL, NULL, NODE_CALL);
+                call->third = params;
+                call->is_index = true;
+                call->has_parens = true;
             }
             call->line = input.line;
             stack_push(stack, (StackSymbol){
@@ -458,6 +471,7 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
             continue;
         }
 
+        // Tečka za operandem začíná volání metody, jejímž příjemcem je aktuální uzel AST.
         if (!expecting_operand && input.type == DOT_TOKEN) {
             int line = input.line;
             parser_advance();
@@ -486,6 +500,7 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
             break;
         }
 
+        // Tabulka rozhoduje, zda se má vstup posunout, zredukovat pravidlo, nebo ohlásit chybu.
         switch (PSA_TABLE[top_symbol][input_symbol]) {
             case REL_LT:
                 // Shift operation

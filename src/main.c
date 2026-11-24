@@ -24,6 +24,7 @@ int main(void) {
     generator_init(&gen, root);
 
     free_AST(root);
+    ast_free_type_refs();
     scanner_free();
     return 0;
 }

@@ -179,7 +179,7 @@ static AST_NODE *parse_type_ref(void) {
 
 // Basic type of a simple type reference, DATA_NONE for List and unions.
 static DATA_TYPE type_ref_basic(AST_NODE *type) {
-    if (type == NULL || type->data_type == DATA_UNION) {
+    if (type == NULL) {
         return DATA_NONE;
     }
     return type->data_type;
@@ -358,6 +358,7 @@ static AST_NODE *parse_pat_arg_node(void) {
             AST_NODE *node = ast_ident_create(NULL, t.atribute, NULL);
             node->id = next_id++;
             node->line = t.line;
+            node->is_binding = true;
             return node;
         }
         case MINUS_TOKEN: {
@@ -404,6 +405,7 @@ static AST_NODE *parse_pattern_node(void) {
             node->data_type = type_ref_basic(node->type_ref);
             node->id = next_id++;
             node->line = t.line;
+            node->is_binding = true;
             return node;
         }
         if (next.type == LPAR_TOKEN) {
@@ -806,10 +808,7 @@ static void parse_mid_item(AST_NODE **head, AST_NODE **tail);
 static void parse_if_stmt(AST_NODE **head, AST_NODE **tail);
 static void parse_while_stmt(AST_NODE **head, AST_NODE **tail);
 static void parse_for_stmt(AST_NODE **head, AST_NODE **tail);
-static AST_NODE *parse_if_else(AST_NODE **head, AST_NODE **tail);
 static AST_NODE *parse_block(void);
-static AST_NODE *parse_if_branch(AST_NODE **head, AST_NODE **tail);
-static void parse_if_then(AST_NODE **head, AST_NODE **tail, AST_NODE *node);
 
 // FIRST(BlockItem), tokens that can start a statement.
 static bool is_stmt_start(Tokens t) {
@@ -878,7 +877,9 @@ static AST_NODE *parse_return_stmt(void) {
     Token kw = parser_advance();
     Token t = parser_peek();
     AST_NODE *node;
-    if (t.type == EOL_TOKEN || t.type == SEMICOLON_TOKEN) {
+    if (t.type == EOL_TOKEN || t.type == SEMICOLON_TOKEN ||
+        t.type == ELSE_TOKEN || t.type == DEDENT_TOKEN ||
+        t.type == RPAR_TOKEN || t.type == COMMA_TOKEN) {
         node = ast_return_create(NULL, NULL); // bare return
     } else {
         node = ast_return_create(parse_rhs(), NULL);
@@ -915,6 +916,30 @@ static AST_NODE *parse_simple_stmt(void) {
         }
         default:
             return wrap_expr_stmt(parse_rhs());
+    }
+}
+
+static AST_NODE *parse_if_branch(void);
+static AST_NODE *parse_while_body(void);
+static AST_NODE *parse_for_body(void);
+
+static AST_NODE *parse_control_body(void) {
+    if (parser_peek().type == EOL_TOKEN) {
+        parser_advance();
+        parser_expect(INDENT_TOKEN);
+        AST_NODE *body = parse_block();
+        parser_expect(DEDENT_TOKEN);
+        return body;
+    }
+    switch (parser_peek().type) {
+        case IF_TOKEN:
+            return parse_if_branch();
+        case WHILE_TOKEN:
+            return parse_while_body();
+        case FOR_TOKEN:
+            return parse_for_body();
+        default:
+            return parse_simple_stmt();
     }
 }
 
@@ -958,80 +983,38 @@ static void parse_mid_item(AST_NODE **head, AST_NODE **tail) {
     parse_line_end(head, tail);
 }
 
-// IfElse → EOL INDENT Block DEDENT | IfStmt | ExprNoIf LineEnd
-static AST_NODE *parse_if_else(AST_NODE **head, AST_NODE **tail) {
-    if (parser_peek().type == EOL_TOKEN) {
-        parser_advance();
-        parser_expect(INDENT_TOKEN);
-        AST_NODE *block = parse_block();
-        parser_expect(DEDENT_TOKEN);
-        return block;
-    }
-    if (parser_peek().type == IF_TOKEN) {
-        return parse_if_branch(head, tail); // else if chain
-    }
-    AST_NODE *value = wrap_expr_stmt(parse_rhs());
-    parse_line_end(head, tail);
-    return value;
-}
-
-// IfStmt in the else branch, the node is returned, not chained.
-static AST_NODE *parse_if_branch(AST_NODE **head, AST_NODE **tail) {
+static AST_NODE *parse_if_branch(void) {
     Token kw = parser_advance();
     AST_NODE *cond = parse_rhs();
     parser_expect(THEN_TOKEN);
-    AST_NODE *node = ast_if_create(cond, NULL, NULL, NULL);
+    AST_NODE *then_branch = parse_control_body();
+    AST_NODE *else_branch = NULL;
+    if (parser_peek().type == ELSE_TOKEN) {
+        parser_advance();
+        else_branch = parse_control_body();
+    }
+    AST_NODE *node = ast_if_create(cond, then_branch, else_branch, NULL);
     node->line = kw.line;
-    parse_if_then(head, tail, node);
     return node;
 }
 
-// IfThen → EOL INDENT Block DEDENT IfTail | Rhs IfElseOpt
-static void parse_if_then(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
-    if (parser_peek().type == EOL_TOKEN) {
-        parser_advance();
-        parser_expect(INDENT_TOKEN);
-        node->right = parse_block();
-        parser_expect(DEDENT_TOKEN);
-        if (parser_peek().type == ELSE_TOKEN) {
-            parser_advance();
-            node->third = parse_if_else(head, tail);
-        }
-        return;
-    }
-    node->right = wrap_expr_stmt(parse_rhs());
-    if (parser_peek().type == ELSE_TOKEN) {
-        parser_advance();
-        node->third = parse_if_else(head, tail);
-    } else {
-        parse_line_end(head, tail);
-    }
-}
-
-// IfStmt → IF Expr THEN IfThen
-// The node is chained before its semicolon siblings are parsed.
 static void parse_if_stmt(AST_NODE **head, AST_NODE **tail) {
-    Token kw = parser_advance();
-    AST_NODE *cond = parse_rhs();
-    parser_expect(THEN_TOKEN);
-    AST_NODE *node = ast_if_create(cond, NULL, NULL, NULL);
-    node->line = kw.line;
-    chain_append(head, tail, node);
-    parse_if_then(head, tail, node);
+    chain_append(head, tail, parse_if_branch());
+    parse_line_end(head, tail);
 }
 
-// WhileStmt → WHILE Expr DO EOL INDENT Block DEDENT
-static void parse_while_stmt(AST_NODE **head, AST_NODE **tail) {
+static AST_NODE *parse_while_body(void) {
     Token kw = parser_advance();
     AST_NODE *cond = parse_rhs();
     parser_expect(DO_TOKEN);
-    parser_expect(EOL_TOKEN);
-    parser_expect(INDENT_TOKEN);
-    AST_NODE *body = parse_block();
-    parser_expect(DEDENT_TOKEN);
-    AST_NODE *node = ast_while_create(cond, body, NULL);
+    AST_NODE *node = ast_while_create(cond, parse_control_body(), NULL);
     node->line = kw.line;
-    chain_append(head, tail, node);
+    return node;
+}
+
+static void parse_while_stmt(AST_NODE **head, AST_NODE **tail) {
+    chain_append(head, tail, parse_while_body());
+    parse_line_end(head, tail);
 }
 
 // ForGuardRest → EOL ForGuardRest | IF Expr EOL ForGuardRest | ε
@@ -1056,19 +1039,6 @@ static AST_NODE *parse_guard_rest(void) {
         break; // DEDENT
     }
     return head;
-}
-
-// DoBody → EOL INDENT Block DEDENT | Rhs LineEnd
-static void parse_do_body(AST_NODE **head, AST_NODE **tail, AST_NODE *node) {
-    if (parser_peek().type == EOL_TOKEN) {
-        parser_advance();
-        parser_expect(INDENT_TOKEN);
-        node->right = parse_block();
-        parser_expect(DEDENT_TOKEN);
-        return;
-    }
-    node->right = wrap_expr_stmt(parse_rhs());
-    parse_line_end(head, tail);
 }
 
 // Converts a range expression (a to b [by c]) into NODE_RANGE.
@@ -1106,37 +1076,33 @@ static AST_NODE *make_range(AST_NODE *expr) {
     return ast_range_create(from, to, step, NULL, inclusive);
 }
 
-// ForStmt → FOR ForHead
-// The node is chained before its semicolon siblings are parsed.
-static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
+static AST_NODE *parse_for_body(void) {
     Token kw = parser_advance();
     AST_NODE *node = ast_for_create(NULL, NULL, NULL, NULL, NULL);
     node->id = next_id++;
     node->line = kw.line;
-    chain_append(head, tail, node);
-    Token id;
-    if (parser_peek().type == EOL_TOKEN) {
-        // ForHead → EOL INDENT ForGen ForGuardRest DEDENT DO DoBody
+    bool multiline = parser_peek().type == EOL_TOKEN;
+    if (multiline) {
         parser_advance();
         parser_expect(INDENT_TOKEN);
-        id = parser_expect(IDENTIFIER_TOKEN); // ForGen: ID <- Expr EOL
-        parser_expect(ARROW_LEFT_TOKEN);
-        node->left = make_range(parse_rhs());
+    }
+    Token id = parser_expect(IDENTIFIER_TOKEN);
+    parser_expect(ARROW_LEFT_TOKEN);
+    node->left = make_range(parse_rhs());
+    if (multiline) {
         parser_expect(EOL_TOKEN);
         node->third = parse_guard_rest();
         parser_expect(DEDENT_TOKEN);
-        parser_expect(DO_TOKEN);
-        ast_name(node, id.atribute);
-        parse_do_body(head, tail, node);
-        return;
     }
-    // ForHead → ForGenInline DO DoBody
-    id = parser_expect(IDENTIFIER_TOKEN);
-    parser_expect(ARROW_LEFT_TOKEN);
-    node->left = make_range(parse_rhs());
     parser_expect(DO_TOKEN);
     ast_name(node, id.atribute);
-    parse_do_body(head, tail, node);
+    node->right = parse_control_body();
+    return node;
+}
+
+static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
+    chain_append(head, tail, parse_for_body());
+    parse_line_end(head, tail);
 }
 
 // BlockItem → SimpleStmt LineEnd | IfStmt | WhileStmt | ForStmt
@@ -1274,12 +1240,9 @@ static void parse_extension_def(AST_NODE **head, AST_NODE **tail) {
             method->is_extension = true;
             AST_NODE *recv = ast_param_create(receiver->data_type,
                                               receiver->name, NULL);
+            recv->type_ref = receiver->type_ref;
             recv->is_method = true;
             recv->line = receiver->line;
-            char *mangled = ast_method_key(method->name, receiver->data_type);
-            free(method->name);
-            ast_name(method, mangled);
-            free(mangled);
             AST_NODE *recv_group = ast_create_param_list(recv, NULL, 1);
             if (method->third == NULL) {
                 method->third = ast_create_params_list_of_list(recv_group, 1);

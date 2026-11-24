@@ -38,16 +38,10 @@ bool symtableInit(symtable_t * table); //starting function, allocates memory for
 void symtableFree(symtable_t * table); //ending function, frees the memory allocated for the symbol table and its items
 bool symtableExists(symtable_t * table); //checks if the symtable even exists
 
-//functions for inserting, searching, and deleting items in the symbol table
+//functions for inserting and searching items in the symbol table
 bool symtableInsert(symtable_t * table, const char * key, void * value);
 void * symtableSearch(symtable_t * table, const char * key);
-bool symtableDelete(symtable_t * table, const char * key);
 size_t symtableFindIndex(symtable_t * table, const char * key);
 bool symtableCheckForDuplicate(symtable_t * table, const char * key);
-void * symtableGetOrInsert(symtable_t * table, const char * key, void * value);
-void symtableUpdateValue(symtable_t * table, const char * key, void * new_value);
-size_t symtableSize(symtable_t * table); //returns the number of items in the symbol table
-
-void symtablePrint(symtable_t * table); //prints the contents of the symbol table for debugging
 
 #endif /* SYMTABLE_H */

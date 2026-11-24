@@ -74,7 +74,8 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
         gen_expr(gen, node->left);
         if (gen->return_type == DATA_UNIT) {
           printf("POPS LF@tmp1\n");
-        } else if (gen->return_type == DATA_DOUBLE && node->left->data_type == DATA_INT) {
+        } else if (gen->return_type == DATA_DOUBLE && node->left->data_type == DATA_INT &&
+                   !node->left->int_to_double) {
           printf("INT2FLOATS\n");
         }
       }
@@ -88,6 +89,30 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
     case NODE_FOR: {
       AST_NODE *range = node->left;
       if (range == NULL) {
+        break;
+      }
+
+      if (range->type != NODE_RANGE && range->data_type == DATA_LIST) {
+        gen_expr(gen, range);
+        printf("POPS LF@for_list$%d\n", node->id);
+        printf("ARRAYGET LF@for_end$%d LF@for_list$%d int@1\n", node->id, node->id);
+        printf("MOVE LF@for_idx$%d int@0\n", node->id);
+        printf("LABEL for$%d\n", node->id);
+        printf("LT LF@tmp1 LF@for_idx$%d LF@for_end$%d\n", node->id, node->id);
+        printf("JUMPIFEQ for$%d$END LF@tmp1 bool@false\n", node->id);
+        printf("ADD LF@tmp2 LF@for_idx$%d int@2\n", node->id);
+        printf("ARRAYGET LF@%s$%d LF@for_list$%d LF@tmp2\n",
+               node->name, node->id, node->id);
+        for (AST_NODE *guard = node->third; guard != NULL; guard = guard->next) {
+          gen_expr(gen, guard);
+          printf("PUSHS bool@false\n");
+          printf("JUMPIFEQS for$%d$NEXT\n", node->id);
+        }
+        gen_block(gen, node->right);
+        printf("LABEL for$%d$NEXT\n", node->id);
+        printf("ADD LF@for_idx$%d LF@for_idx$%d int@1\n", node->id, node->id);
+        printf("JUMP for$%d\n", node->id);
+        printf("LABEL for$%d$END\n", node->id);
         break;
       }
 
@@ -168,7 +193,8 @@ void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result) {
         (stmt->type == NODE_EXPR_STMT || stmt->type == NODE_IF)) {
       AST_NODE *expr = stmt->type == NODE_EXPR_STMT ? stmt->left : stmt;
       gen_expr(gen, expr);
-      if (result == DATA_DOUBLE && expr->data_type == DATA_INT) {
+      if (result == DATA_DOUBLE && expr->data_type == DATA_INT &&
+          !expr->int_to_double) {
         printf("INT2FLOATS\n");
       }
       return;

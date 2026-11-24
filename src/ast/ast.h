@@ -79,6 +79,7 @@ typedef enum{
   DATA_UNIT,
   DATA_LIST,
   DATA_UNION,
+  DATA_CLASS,
 } DATA_TYPE;
 
 typedef enum{
@@ -123,6 +124,12 @@ struct AST_NODE{
 
   bool is_extension; //extkw
   bool is_index;
+  bool is_ctor;
+  bool is_static_call;
+  bool is_field;
+  bool is_binding;
+  bool is_function_ref;
+  int field_index;
   bool int_to_double;
 
   /*
@@ -159,8 +166,8 @@ struct AST_NODE{
 
 
 AST_NODE *ast_create(AST_NODE *left, AST_NODE *right,AST_NODE *next, NODE_TYPE type);
-const char *ast_type_suffix(DATA_TYPE type);
-char *ast_method_key(const char *name, DATA_TYPE receiver);
+char *ast_type_key(const AST_NODE *type);
+char *ast_method_key(const char *name, const AST_NODE *receiver);
 void ast_name(AST_NODE *node, char *name);
 
 AST_NODE * ast_int_literal_create( long long value,AST_NODE *next);
@@ -320,6 +327,7 @@ AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
 
 
 void free_AST(AST_NODE *node);
+void ast_free_type_refs(void);
 
 /* ladici vypis AST jako strom na stderr (ast.c) */
 void ast_print(const AST_NODE *root);

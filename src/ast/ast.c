@@ -25,7 +25,7 @@ static char *ast_strdup(const char *ptr) {
 }
 
 
-const char *ast_type_suffix(DATA_TYPE type) {
+static const char *ast_type_suffix(DATA_TYPE type) {
   switch (type) {
     case DATA_INT: return "Int";
     case DATA_DOUBLE: return "Double";
@@ -34,18 +34,87 @@ const char *ast_type_suffix(DATA_TYPE type) {
     case DATA_UNIT: return "Unit";
     case DATA_LIST: return "List";
     case DATA_UNION: return "Union";
+    case DATA_CLASS: return "Class";
     default: return "Unknown";
   }
 }
 
-char *ast_method_key(const char *name, DATA_TYPE receiver) {
-  const char *suffix = ast_type_suffix(receiver);
-  size_t len = strlen(name) + strlen(suffix) + 2;
+static char *join_type_keys(const char *first, const char *separator, const char *second) {
+  size_t len = strlen(first) + strlen(separator) + strlen(second) + 1;
   char *key = malloc(len);
   if (key == NULL) {
     exit(99);
   }
-  snprintf(key, len, "%s$%s", name, suffix);
+  snprintf(key, len, "%s%s%s", first, separator, second);
+  return key;
+}
+
+static size_t union_member_count(const AST_NODE *type) {
+  if (type->data_type != DATA_UNION) {
+    return 1;
+  }
+  return union_member_count(type->left) + union_member_count(type->right);
+}
+
+static void collect_union_keys(const AST_NODE *type, char **keys, size_t *count) {
+  if (type->data_type == DATA_UNION) {
+    collect_union_keys(type->left, keys, count);
+    collect_union_keys(type->right, keys, count);
+  } else {
+    keys[(*count)++] = ast_type_key(type);
+  }
+}
+
+static int compare_type_keys(const void *first, const void *second) {
+  return strcmp(*(char *const *)first, *(char *const *)second);
+}
+
+char *ast_type_key(const AST_NODE *type) {
+  if (type == NULL) {
+    return ast_strdup("Unknown");
+  }
+  if (type->data_type == DATA_CLASS && type->name != NULL) {
+    return join_type_keys("Class", "$", type->name);
+  }
+  if (type->data_type == DATA_LIST) {
+    char *elem = ast_type_key(type->left);
+    char *prefix = join_type_keys("List", "$", elem);
+    char *key = join_type_keys(prefix, "&", "");
+    free(prefix);
+    free(elem);
+    return key;
+  }
+  if (type->data_type == DATA_UNION) {
+    char **keys = malloc(union_member_count(type) * sizeof(*keys));
+    if (keys == NULL) {
+      exit(99);
+    }
+    size_t count = 0;
+    collect_union_keys(type, keys, &count);
+    qsort(keys, count, sizeof(*keys), compare_type_keys);
+    char *key = ast_strdup("Union");
+    for (size_t i = 0; i < count; i++) {
+      if (i == 0 || strcmp(keys[i - 1], keys[i]) != 0) {
+        char *previous = key;
+        key = join_type_keys(previous, "$", keys[i]);
+        free(previous);
+      }
+    }
+    for (size_t i = 0; i < count; i++) {
+      free(keys[i]);
+    }
+    free(keys);
+    char *closed = join_type_keys(key, "&", "");
+    free(key);
+    return closed;
+  }
+  return ast_strdup(ast_type_suffix(type->data_type));
+}
+
+char *ast_method_key(const char *name, const AST_NODE *receiver) {
+  char *suffix = ast_type_key(receiver);
+  char *key = join_type_keys(name, "$", suffix);
+  free(suffix);
   return key;
 }
 
@@ -240,8 +309,38 @@ AST_NODE *ast_create_param_list(AST_NODE *params, AST_NODE *next, int param_cnt)
   return node;
 }
 
+typedef struct TypeRefAllocation {
+  AST_NODE node;
+  struct TypeRefAllocation *next;
+} TypeRefAllocation;
+
+static TypeRefAllocation *type_refs;
+
+static AST_NODE *allocate_type_ref(AST_NODE *left, AST_NODE *right, AST_NODE *next) {
+  TypeRefAllocation *entry = calloc(1, sizeof(*entry));
+  if (entry == NULL) {
+    exit(99);
+  }
+  entry->node.type = NODE_TYPE_REF;
+  entry->node.left = left;
+  entry->node.right = right;
+  entry->node.next = next;
+  entry->next = type_refs;
+  type_refs = entry;
+  return &entry->node;
+}
+
+void ast_free_type_refs(void) {
+  while (type_refs != NULL) {
+    TypeRefAllocation *entry = type_refs;
+    type_refs = entry->next;
+    free(entry->node.name);
+    free(entry);
+  }
+}
+
 AST_NODE *ast_type_ref_create(DATA_TYPE base, char *name, AST_NODE *next) {
-  AST_NODE *node = ast_create(NULL, NULL, next, NODE_TYPE_REF);
+  AST_NODE *node = allocate_type_ref(NULL, NULL, next);
   node->data_type = base;
   if (name != NULL) {
     ast_name(node, name);
@@ -250,13 +349,13 @@ AST_NODE *ast_type_ref_create(DATA_TYPE base, char *name, AST_NODE *next) {
 }
 
 AST_NODE *ast_list_type_ref_create(AST_NODE *elem, AST_NODE *next) {
-  AST_NODE *node = ast_create(elem, NULL, next, NODE_TYPE_REF);
+  AST_NODE *node = allocate_type_ref(elem, NULL, next);
   node->data_type = DATA_LIST;
   return node;
 }
 
 AST_NODE *ast_union_type_ref_create(AST_NODE *left, AST_NODE *right, AST_NODE *next) {
-  AST_NODE *node = ast_create(left, right, next, NODE_TYPE_REF);
+  AST_NODE *node = allocate_type_ref(left, right, next);
   node->data_type = DATA_UNION;
   return node;
 }
@@ -301,20 +400,16 @@ AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next) {
 }
 
 void free_AST(AST_NODE *node) {
-  if (!node) {return;}
+  if (!node || node->type == NODE_TYPE_REF) {return;}
   free_AST(node->left);
   free_AST(node->right);
   free_AST(node->next);
   free_AST(node->third);
-  free_AST(node->type_ref);
   free_AST(node->arg_groups);
   free(node->name);
   free(node->sval);
   free(node);
 }
-
-
-//TODO VYMAZAT AI SNOB
 
 
 /* ---------------------------------------------------------------- nazvy */

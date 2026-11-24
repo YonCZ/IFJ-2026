@@ -13,13 +13,16 @@ Part of project IFJ2026
 
 typedef enum {
     SYM_VAR,
-    SYM_FUNC
+    SYM_FUNC,
+    SYM_TYPE,
+    SYM_CLASS
 } symbol_kind_t;
 
 typedef struct {
     char *name;
     DATA_TYPE type;
     DATA_TYPE elem_type;
+    AST_NODE *type_ref;
     int id;
 } param_info_t;
 
@@ -29,6 +32,7 @@ typedef struct {
     char *name;
     DATA_TYPE data_type;      // U proměnné její typ; u funkce návratový typ
     DATA_TYPE elem_type;      // Typ prvku, pokud je proměnná seznam
+    AST_NODE *type_ref;       // Plný typ (seznam, sjednocení, třída)
     bool is_const;            // true pro val a parametry funkce, false pro var
 
     /* Položky pro funkce (kind == SYM_FUNC) */
@@ -63,6 +67,7 @@ typedef struct {
     bool in_loop;
     int next_scope_id;
     bool has_main;
+    AST_NODE *expected_type;
 } semantic_context_t;
 
 /* Hlavní vstupní bod volaný z main.c nad kořenem AST */
