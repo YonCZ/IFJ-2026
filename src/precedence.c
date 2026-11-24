@@ -29,7 +29,7 @@ for lists extension:
 */
 #include "precedence.h"
 #include "error.h"
-#include "parser/parser.h"
+#include "parser.h"
 #include "scanner.h"
 #include "stack.h"
 #include "symtable.h"

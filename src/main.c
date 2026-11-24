@@ -8,7 +8,7 @@
 #include "error.h"
 #include "generator.h"
 #include "parser.h"
-#include "parser/semantic.h"
+#include "semantic.h"
 #include "scanner.h"
 
 // nacte vstup, spusti scanner, parser, semantiku a generator

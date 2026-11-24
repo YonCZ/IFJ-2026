@@ -6,7 +6,7 @@
 #ifndef STACK_H
 #define STACK_H
 
-#include "scanner/token.h"
+#include "token.h"
 #include <stdbool.h>
 
 // Kind of one stack symbol.

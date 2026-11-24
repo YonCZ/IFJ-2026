@@ -13,7 +13,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "scanner/error.h"
+#include "error.h"
 #include "stack.h"
 
 #define STACK_INIT_CAP 16

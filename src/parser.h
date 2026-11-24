@@ -7,8 +7,8 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include "ast/ast.h"
-#include "scanner/token.h"
+#include "ast.h"
+#include "token.h"
 
 Token parser_peek(void);
 Token parser_peek_next(void);

@@ -6,8 +6,8 @@ Part of project IFJ2026
 #ifndef SEMANTIC_H
 #define SEMANTIC_H
 
-#include "ast/ast.h"
-#include "symtable/symtable.h"
+#include "ast.h"
+#include "symtable.h"
 #include <stdbool.h>
 #include <stddef.h>
 

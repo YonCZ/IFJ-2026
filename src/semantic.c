@@ -7,11 +7,11 @@ This file contains semantic analysis functions.
 This file was developed with the help of the Gemini Hydrogen AI model.
 */
 
-#include "parser/semantic.h"
-#include "ast/ast.h"
-#include "parser/parser.h"
-#include "scanner/error.h"
-#include "symtable/symtable.h"
+#include "semantic.h"
+#include "ast.h"
+#include "parser.h"
+#include "error.h"
+#include "symtable.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

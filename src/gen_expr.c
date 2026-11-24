@@ -15,7 +15,7 @@
 #include "ast.h"
 #include "gen_internal.h"
 #include "generator.h"
-#include "scanner/error.h"
+#include "error.h"
 //===========================
 // puts one value on stack
 //===========================

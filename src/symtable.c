@@ -5,7 +5,7 @@ Part of project IFJ2026
 */
 
 #include "symtable.h"
-#include "scanner/error.h"
+#include "error.h"
 #include <stdlib.h>
 #include <string.h>
 

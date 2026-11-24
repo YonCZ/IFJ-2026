@@ -16,10 +16,10 @@
 #include <string.h>
 
 #include "parser.h"
-#include "scanner/error.h"
-#include "scanner/scanner.h"
-#include "scanner/token.h"
-#include "symtable/precedence.h"
+#include "error.h"
+#include "scanner.h"
+#include "token.h"
+#include "precedence.h"
 
 // All tokens of the input, loaded once at the start.
 static Token *tokens;
