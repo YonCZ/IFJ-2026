@@ -183,12 +183,14 @@ void gen_stmt(Gen *gen, AST_NODE *node) {
   }
 }
 
+// generates code for all statements in a block
 void gen_block(Gen *gen, AST_NODE *fn) {
   for (AST_NODE *node = fn; node != NULL; node = node->next) {
     gen_stmt(gen, node);
   }
 }
 
+// generates a block so its last expression is the value
 void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result) {
   for (; stmt != NULL; stmt = stmt->next) {
     if (stmt->next == NULL && result != DATA_UNIT &&

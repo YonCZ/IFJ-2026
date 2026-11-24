@@ -44,14 +44,17 @@ void literal(AST_NODE *node, char *func_name) {
   printf("\n");
 }
 
+// stores a stack value into the node variable
 void pop_to_val(AST_NODE *node) {
   printf("POPS LF@%s$%d\n", node->name, node->id);
 }
 
+// pushes the node variable onto the stack
 void push_to_val(AST_NODE *node) {
   printf("PUSHS LF@%s$%d\n", node->name, node->id);
 }
 
+// generates list construction
 static void gen_list_constructor(Gen *gen, AST_NODE *node) {
   size_t count = 0;
   for (AST_NODE *arg = node->third; arg != NULL; arg = arg->next) {
@@ -71,6 +74,7 @@ static void gen_list_constructor(Gen *gen, AST_NODE *node) {
   printf("PUSHS LF@tmp2\n");
 }
 
+// generates case class construction
 static void gen_case_constructor(Gen *gen, AST_NODE *node) {
   size_t count = 0;
   for (AST_NODE *arg = node->third; arg != NULL; arg = arg->next) {
@@ -87,6 +91,7 @@ static void gen_case_constructor(Gen *gen, AST_NODE *node) {
   printf("PUSHS LF@tmp2\n");
 }
 
+// generates a list from a range
 static void gen_range_list(Gen *gen, AST_NODE *node) {
   AST_NODE *range = node;
   AST_NODE *step = NULL;
@@ -127,6 +132,7 @@ static void gen_range_list(Gen *gen, AST_NODE *node) {
   printf("PUSHS int@%d\n", inclusive ? 1 : 0);
   printf("CALL $b_list_range\n");
 }
+// generates call arguments on the stack
 static void gen_call_args(Gen *gen, AST_NODE *call) {
   if (call->arg_groups != NULL) {
     for (AST_NODE *group = call->arg_groups->next; group != NULL;
@@ -142,6 +148,7 @@ static void gen_call_args(Gen *gen, AST_NODE *call) {
   }
 }
 
+// returns the type name for pattern matching
 static const char *basic_pattern_type(DATA_TYPE type) {
   switch (type) {
   case DATA_INT:
@@ -159,6 +166,7 @@ static const char *basic_pattern_type(DATA_TYPE type) {
   }
 }
 
+// generates literal pattern comparison
 static void gen_literal_pattern(Gen *gen, AST_NODE *pattern, const char *value,
                                 int fail_label) {
   printf("TYPE LF@tmp1 %s\n", value);
@@ -202,6 +210,7 @@ static void gen_literal_pattern(Gen *gen, AST_NODE *pattern, const char *value,
   printf("PUSHS bool@false\n");
   printf("JUMPIFEQS xMATCH$%d\n", fail_label);
 }
+// generates type pattern comparison
 static void gen_type_pattern(Gen *gen, AST_NODE *type, const char *value,
                              int fail_label) {
   if (type == NULL) {
@@ -236,6 +245,7 @@ static void gen_type_pattern(Gen *gen, AST_NODE *type, const char *value,
          basic_pattern_type(type->data_type));
 }
 
+// generates one pattern test
 static void gen_pattern_test(Gen *gen, AST_NODE *pattern, int match_id,
                              int fail_label) {
   if (pattern == NULL || pattern->type == NODE_WILDCARD) {
@@ -266,6 +276,7 @@ static void gen_pattern_test(Gen *gen, AST_NODE *pattern, int match_id,
   }
 }
 
+// generates filter, takeWhile or dropWhile
 static void gen_list_predicate(Gen *gen, AST_NODE *node, int kind) {
   int lbl = new_label(gen);
   gen_expr(gen, node->left);
@@ -321,6 +332,7 @@ static void gen_list_predicate(Gen *gen, AST_NODE *node, int kind) {
   puts("PUSHS LF@dest");
   puts("POPFRAME");
 }
+// generates a match expression
 static void gen_match(Gen *gen, AST_NODE *node) {
   int match_id = node->field_index;
   int end_label = new_label(gen);
@@ -341,6 +353,7 @@ static void gen_match(Gen *gen, AST_NODE *node) {
   printf("LABEL xMATCH$%d$END\n", end_label);
 }
 
+// generates code for an expression
 void gen_expr(Gen *gen, AST_NODE *node) {
   if (node == NULL) {
     return;

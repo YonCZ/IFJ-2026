@@ -21,59 +21,57 @@ typedef struct {
   int id;
 } param_info_t;
 
-/* Záznam ukládaný do void *value ve tvé symtable_t */
+/* record stored in void *value in symtable_t */
 typedef struct {
   symbol_kind_t kind;
   char *name;
-  DATA_TYPE data_type; // U proměnné její typ; u funkce návratový typ
-  DATA_TYPE elem_type; // Typ prvku, pokud je proměnná seznam
-  AST_NODE *type_ref;  // Plný typ (seznam, sjednocení, třída)
-  bool is_const;       // true pro val a parametry funkce, false pro var
+  DATA_TYPE data_type; // variable type or function return type
+  DATA_TYPE elem_type; // element type if the variable is a list
+  AST_NODE *type_ref;  // full type (list, union, class)
+  bool is_const;       // true for val and function parameters, false for var
 
-  /* Položky pro funkce (kind == SYM_FUNC) */
-  bool is_main;         // true pro @main
-  bool is_defined;      // true po kontrole těla funkce
-  bool explicit_return; // true, pokud byl návratový typ uveden v hlavičce
+  /* function fields (kind == SYM_FUNC) */
+  bool is_main;         // true for @main
+  bool is_defined;      // true after checking the function body
+  bool explicit_return; // true when the return type was given in the header
   AST_NODE *visited_from;
-  bool is_builtin;      // true pro vestavěné funkce
-  bool is_extension;    // true pro metodu z extension bloku
-  AST_NODE *fn_node;    // uzel definice pro odlozene odvozeni typu
-  bool analyzing;       // probiha odvozovani typu
-  int id;               // unikátní id proměnné pro generátor
-  param_info_t *params; // Pole parametrů
-  size_t param_count;   // Počet parametrů
-  size_t group_count;   // Počet skupin parametrů
-  size_t *group_counts; // Počet parametrů v jednotlivých skupinách
+  bool is_builtin;      // true for built-in functions
+  bool is_extension;    // true for a method from an extension block
+  AST_NODE *fn_node;    // definition node for deferred type inference
+  bool analyzing;       // type inference is in progress
+  int id;               // unique variable id for the generator
+  param_info_t *params; // parameter array
+  size_t param_count;   // number of parameters
+  size_t group_count;   // number of parameter groups
+  size_t *group_counts; // parameters per group
 } symbol_info_t;
 
-/* Položka zásobníku lokálních rozsahů platnosti (pro shadowing a bloky) */
+/* stack item for local scopes (for shadowing and blocks) */
 typedef struct scope_node {
   symtable_t symtable;
-  int scope_id;
   struct scope_node *parent;
 } scope_node_t;
 
-/* Kontext sémantické analýzy */
+/* semantic analysis context */
 typedef struct {
-  symtable_t global_symtable; // Globální tabulka funkcí
-  scope_node_t *
-      current_scope; // Vrchol zásobníku lokálních bloků (místo jedné symtable*)
-  symbol_info_t *current_func; // Právě analyzovaná funkce
+  symtable_t global_symtable;  // global function table
+  scope_node_t *current_scope; // top of the local block stack (instead of a
+                               // single symtable*)
+  symbol_info_t *current_func; // currently analyzed function
   bool in_function;
   bool in_loop;
-  int next_scope_id;
   bool has_main;
   AST_NODE *expected_type;
 } semantic_context_t;
 
-/* Hlavní vstupní bod volaný z main.c nad kořenem AST */
+/* main entry point called from main.c on the AST root */
 void semantic_analyze(AST_NODE *root);
 
-/* Správa rozsahů platnosti (scopes) */
+/* scope management */
 void newScope(semantic_context_t *context);
 void freeScope(semantic_context_t *context);
 
-/* Vyhledávání a kontrola deklarací */
+/* declaration lookup and checks */
 symbol_info_t *findInScope(semantic_context_t *context, const char *name);
 bool is_variable_declared(symtable_t *symtable, const char *name);
 bool is_function_declared(symtable_t *symtable, const char *name);

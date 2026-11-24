@@ -76,6 +76,7 @@ static const char *const BUILTIN_NAME[B_COUNT] = {
 static bool used[B_COUNT];
 static bool used_tostr_int, used_tostr_float, used_tostr_bool;
 
+// Najde index vestavěné funkce podle jména.
 static int builtin_index(const char *name) {
   for (int i = 0; i < B_COUNT; i++)
     if (strcmp(BUILTIN_NAME[i], name) == 0)
@@ -197,6 +198,7 @@ static void def_read(const char *name, const char *type,
   puts("RETURN");
 }
 
+// Vygeneruje runtime pro readIntMaybe nebo readDoubleMaybe.
 static void def_readmaybe(const char *name, const char *type) {
   printf("LABEL $b_%s\n", name);
   puts("CREATEFRAME");
@@ -359,6 +361,7 @@ static void def_substr(void) {
   puts("EXIT int@40");
 }
 
+// Vygeneruje runtime pomocné funkce pro seznamy.
 static void def_list_helpers(void) {
   puts("LABEL $b_list_get");
   puts("CREATEFRAME");

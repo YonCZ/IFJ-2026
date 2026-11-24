@@ -63,14 +63,6 @@ void ds_push_char(DString *s, char c) {
   s->data[s->len] = '\0';
 }
 
-// funkce ktera pushuje stringy
-void ds_push_str(DString *s, const char *str) {
-  // pokud string tak pushuj lol
-  while (*str) {
-    ds_push_char(s, *str++);
-  }
-}
-
 // funkce ktera vyrobi novou kopii stringu
 char *ds_dup(const DString *s) {
   // alokujeme nove misto

@@ -16,6 +16,7 @@ This file was developed with the help of the Gemini Hydrogen AI model.
 #include <stdlib.h>
 #include <string.h>
 
+// copies a string, exits on allocation failure
 static char *dup_string(const char *src) {
   size_t len = strlen(src) + 1;
   char *copy = malloc(len);
@@ -26,30 +27,29 @@ static char *dup_string(const char *src) {
   return copy;
 }
 
-/* Vytvoří nový rozsah platnosti a položí ho na zásobník. */
+/* initializes a new scope and pushes it onto the scope stack */
 void newScope(semantic_context_t *context) {
-  // Každý rozsah má vlastní tabulku symbolů a ukazuje na rozsah, který ho
-  // obklopuje.
+  // each scope owns a separate symbol table and points to the scope that
+  // encloses it
   scope_node_t *new_scope = calloc(1, sizeof(scope_node_t));
   if (new_scope == NULL) {
     error_exit(ERROR_INTERNAL, 0, "Memory allocation failed for new scope.");
     return;
   }
   symtableInit(&new_scope->symtable);
-  new_scope->scope_id = context->next_scope_id++;
   new_scope->parent = context->current_scope;
   context->current_scope = new_scope;
 }
 
 static void free_symbol(symbol_info_t *info);
 
-/* Uvolní aktuální rozsah a sundá ho ze zásobníku. */
+/* frees the current scope and pops it from the scope stack */
 void freeScope(semantic_context_t *context) {
   if (context == NULL || context->current_scope == NULL) {
     return;
   }
   scope_node_t *scope = context->current_scope;
-  // Rodiče obnovíme dřív, než uvolníme aktuální rozsah a jeho symboly.
+  // restore the parent before releasing the current scope and its symbols
   context->current_scope = scope->parent;
   for (size_t i = 0; i < scope->symtable.size; i++) {
     if (scope->symtable.items[i].status == SLOT_OCCUPIED) {
@@ -60,12 +60,13 @@ void freeScope(semantic_context_t *context) {
   free(scope);
 }
 
-/* Hledá proměnnou od nejvnitřnějšího bloku (current_scope) směrem ven
+/* searches for a variable from the innermost block (current_scope) outward
  * (shadowing) */
 symbol_info_t *findInScope(semantic_context_t *context, const char *name) {
   scope_node_t *scope = context->current_scope;
   while (scope != NULL) {
-    // Hledání zevnitř ven dává vnitřním deklaracím přednost před vnějšími.
+    // searching from the inside out gives inner declarations priority over
+    // outer ones
     if (symtableCheckForDuplicate(&scope->symtable, name)) {
       return (symbol_info_t *)symtableSearch(&scope->symtable, name);
     }
@@ -74,7 +75,7 @@ symbol_info_t *findInScope(semantic_context_t *context, const char *name) {
   return NULL; // Not found in any scope
 }
 
-/* Kontroluje existenci proměnné POUZE v aktuálním (nejvrchnějším) bloku */
+/* checks existence of a variable only in the current scope */
 bool is_variable_declared(symtable_t *symtable, const char *name) {
   if (symtable == NULL || name == NULL) {
     return false;
@@ -82,7 +83,7 @@ bool is_variable_declared(symtable_t *symtable, const char *name) {
   return symtableCheckForDuplicate(symtable, name);
 }
 
-/* Kontroluje existenci funkce v globální tabulce symbolů */
+/* checks existence of a function in the global symbol table */
 bool is_function_declared(symtable_t *symtable, const char *name) {
   if (symtable == NULL || name == NULL) {
     return false;
@@ -90,9 +91,9 @@ bool is_function_declared(symtable_t *symtable, const char *name) {
   return symtableCheckForDuplicate(symtable, name);
 }
 
+// stores the declaration data needed by later lookups and code generation
 static symbol_info_t *create_var_symbol(const char *name, DATA_TYPE type,
                                         bool is_const, int id) {
-  // Uloží data deklarace pro pozdější vyhledání a generování kódu.
   symbol_info_t *info = calloc(1, sizeof(symbol_info_t));
   if (info == NULL) {
     error_exit(ERROR_INTERNAL, 0,
@@ -107,10 +108,10 @@ static symbol_info_t *create_var_symbol(const char *name, DATA_TYPE type,
   return info;
 }
 
+// function symbols start with empty parameter and return-tracking metadata
 static symbol_info_t *create_func_symbol(const char *name, DATA_TYPE ret_type,
                                          bool explicit_ret, bool is_main,
                                          bool is_builtin) {
-  // Funkce začíná s prázdnými metadaty o parametrech a návratovém typu.
   symbol_info_t *info = calloc(1, sizeof(symbol_info_t));
   if (info == NULL) {
     error_exit(ERROR_INTERNAL, 0,
@@ -127,6 +128,7 @@ static symbol_info_t *create_func_symbol(const char *name, DATA_TYPE ret_type,
   return info;
 }
 
+// frees the symbol name and structure
 static void free_symbol(symbol_info_t *info) {
   if (info != NULL) {
     free(info->name);
@@ -134,6 +136,7 @@ static void free_symbol(symbol_info_t *info) {
   }
 }
 
+// returns the element type of a list, DATA_NONE otherwise
 static DATA_TYPE type_ref_elem(AST_NODE *type) {
   if (type == NULL || type->data_type != DATA_LIST || type->left == NULL) {
     return DATA_NONE;
@@ -141,10 +144,12 @@ static DATA_TYPE type_ref_elem(AST_NODE *type) {
   return type->left->data_type;
 }
 
+// creates a type ref for a basic type
 static AST_NODE *basic_type_node(DATA_TYPE type) {
   return ast_type_ref_create(type, NULL, NULL);
 }
 
+// resolves aliases and class names to concrete type refs
 static AST_NODE *resolve_type_ref(AST_NODE *type, semantic_context_t *context) {
   if (type == NULL) {
     return NULL;
@@ -181,6 +186,8 @@ static AST_NODE *resolve_type_ref(AST_NODE *type, semantic_context_t *context) {
   return type;
 }
 
+// returns the type ref of an expression, deriving it from its data type if
+// needed
 static AST_NODE *type_ref_of_expr(AST_NODE *expr) {
   if (expr == NULL) {
     return NULL;
@@ -196,6 +203,7 @@ static AST_NODE *type_ref_of_expr(AST_NODE *expr) {
   return basic_type_node(expr->data_type);
 }
 
+// finds the list member of a union
 static AST_NODE *find_list_member(AST_NODE *type) {
   if (type == NULL) {
     return NULL;
@@ -210,8 +218,8 @@ static AST_NODE *find_list_member(AST_NODE *type) {
   return NULL;
 }
 
-/* Ověří kompatibilitu typů včetně konverze Int -> Double, seznamů, sjednocení a
- * tříd. */
+/* checks type compatibility including Int -> Double conversion, lists, unions
+ * and classes */
 static bool is_type_compatible_ref(AST_NODE *target, AST_NODE *source,
                                    bool *needs_int_to_double) {
   if (needs_int_to_double != NULL) {
@@ -259,7 +267,7 @@ static bool is_type_compatible_ref(AST_NODE *target, AST_NODE *source,
   }
   if (target->data_type != source->data_type) {
     if (target->data_type == DATA_DOUBLE && source->data_type == DATA_INT) {
-      // Implicitní rozšíření Int -> Double se zapamatuje pro generátor.
+      // implicit Int -> Double widening is recorded for the generator
       if (needs_int_to_double != NULL) {
         *needs_int_to_double = true;
       }
@@ -270,6 +278,7 @@ static bool is_type_compatible_ref(AST_NODE *target, AST_NODE *source,
   return true;
 }
 
+// checks compatibility of basic types
 static bool is_type_compatible(DATA_TYPE target, DATA_TYPE source,
                                bool *needs_int_to_double) {
   return is_type_compatible_ref(basic_type_node(target),
@@ -279,6 +288,7 @@ static bool is_type_compatible(DATA_TYPE target, DATA_TYPE source,
 static bool coerce_value_expr(AST_NODE *value, AST_NODE *target,
                               semantic_context_t *context);
 
+// coerces the last expression of a branch to the expected type
 static bool coerce_branch_chain(AST_NODE *chain, AST_NODE *target,
                                 semantic_context_t *context) {
   if (chain == NULL) {
@@ -291,6 +301,7 @@ static bool coerce_branch_chain(AST_NODE *chain, AST_NODE *target,
   return coerce_value_expr(last, target, context);
 }
 
+// checks and coerces the elements of a List constructor
 static bool coerce_list_constructor(AST_NODE *call, AST_NODE *target,
                                     semantic_context_t *context) {
   if (target == NULL || target->data_type != DATA_LIST) {
@@ -318,6 +329,7 @@ static bool coerce_list_constructor(AST_NODE *call, AST_NODE *target,
   return ok;
 }
 
+// checks an expression against the expected type and marks conversions
 static bool coerce_value_expr(AST_NODE *value, AST_NODE *target,
                               semantic_context_t *context) {
   if (value == NULL || target == NULL) {
@@ -367,12 +379,13 @@ static bool coerce_value_expr(AST_NODE *value, AST_NODE *target,
   return true;
 }
 
-// prvni pruchod AST: posbirat hlavicky vsech funkci, odhalit redefinice (chyba
-// 4) a overit @main (chyby 3, 4, 5, 6)
-/* Pomocná funkce pro přiřazení parametrů vestavěným funkcím */
+// first AST pass: collect all function headers, detect redefinitions (error 4)
+// and verify @main (errors 3, 4, 5, 6)
+/* helper function for assigning parameters to built-in functions */
 static void set_builtin_params(symbol_info_t *fn, size_t count,
                                const DATA_TYPE *types) {
-  // Vestavěné funkce nemají jména parametrů, kontrolují se jen jejich typy.
+  // built-ins do not need parameter names, but their types are checked like
+  // user-defined functions
   fn->param_count = count;
   fn->group_count = 1;
   fn->group_counts = malloc(sizeof(size_t));
@@ -392,18 +405,19 @@ static void set_builtin_params(symbol_info_t *fn, size_t count,
     return;
   }
   for (size_t i = 0; i < count; i++) {
-    // Jména parametrů se záměrně nevyplňují, volání kontrolují jen typy.
+    // built-in parameter names are intentionally omitted because calls validate
+    // only their types
     fn->params[i].name = NULL;
     fn->params[i].type = types[i];
   }
 }
 
-/* Přednaplní global_symtable vestavěnými funkcemi (print, readInt, subStr, ...)
- */
+/* prepopulates global_symtable with built-in functions (print, readInt, subStr,
+ * ...) */
 static void register_builtin_functions(semantic_context_t *context) {
   symbol_info_t *fn;
 
-  // print(value: Any): Unit -> pro Any použijeme speciální kontrolu v
+  // print(value: Any): Unit -> Any uses special validation in
   // analyze_function_call
   fn = create_func_symbol("print", DATA_UNIT, true, false, true);
   set_builtin_params(fn, 1, (DATA_TYPE[]){DATA_UNIT});
@@ -469,8 +483,8 @@ static void register_builtin_functions(semantic_context_t *context) {
   symtableInsert(&context->global_symtable, "List", fn);
 }
 
-/* 0. průchod: zaregistruje jména typů a tříd, aby šly řešit aliasy a rekurzivní
- * třídy. */
+/* pass 0: registers type and class names so aliases and recursive classes can
+ * be resolved */
 static void register_type_names(AST_NODE *root, semantic_context_t *context) {
   AST_NODE *curr =
       (root != NULL && root->type == NODE_PROGRAM) ? root->left : root;
@@ -492,7 +506,7 @@ static void register_type_names(AST_NODE *root, semantic_context_t *context) {
       sym->data_type = DATA_NONE;
       symtableInsert(&context->global_symtable, curr->name, sym);
     } else if (curr->type == NODE_CASE_CLASS) {
-      // Case class se zaregistruje jako typ s metadaty o atributech.
+      // case classes are registered as types with attribute metadata
       if (symtableCheckForDuplicate(&context->global_symtable, curr->name)) {
         error_exit(ERROR_SEM_REDEF, curr->line, curr->name,
                    "Class redefinition.");
@@ -537,6 +551,7 @@ static void register_type_names(AST_NODE *root, semantic_context_t *context) {
   }
 }
 
+// resolves type refs of types, classes and functions
 static void resolve_program_types(AST_NODE *root, semantic_context_t *context) {
   AST_NODE *curr =
       (root != NULL && root->type == NODE_PROGRAM) ? root->left : root;
@@ -602,8 +617,8 @@ static void resolve_program_types(AST_NODE *root, semantic_context_t *context) {
   }
 }
 
-/* 1. průchod: posbírá hlavičky všech funkcí, odhalí redefinice (chyba 4) a
- * ověří @main (chyby 3, 4, 5, 6) */
+/* first pass: collects all function headers, detects redefinitions (error 4)
+ * and verifies @main (errors 3, 4, 5, 6) */
 static void collect_global_functions(AST_NODE *root,
                                      semantic_context_t *context) {
   AST_NODE *curr =
@@ -626,16 +641,16 @@ static void collect_global_functions(AST_NODE *root,
       DATA_TYPE ret_elem = type_ref_elem(curr->type_ref);
       bool is_main = curr->is_main;
 
-      // Skupiny parametrů se zplošťují, protože AST drží každou skupinu zvlášť.
+      // parameter groups are flattened because the AST stores each source-level
+      // group separately
       size_t p_count = 0;
-      // Počet parametrů zjistíme předem, abychom mohli alokovat jedno pole.
+      // count parameters before allocating one contiguous metadata array
       for (AST_NODE *g = curr->third != NULL ? curr->third->next : NULL;
            g != NULL; g = g->next) {
         p_count += (size_t)g->param_cnt;
       }
 
-      // @main musí být jediný, bez parametrů a s explicitním návratovým typem
-      // Unit.
+      // main must be unique, parameterless, and explicitly return Unit
       if (is_main) {
         if (context->has_main) {
           error_exit(ERROR_SEM_REDEF, curr->line, curr->name,
@@ -688,8 +703,8 @@ static void collect_global_functions(AST_NODE *root,
           return;
         }
         size_t idx = 0;
-        // Zkopírujeme jména, typy a id parametrů ze všech skupin do symbolu
-        // funkce.
+        // copy parameter names, types, and ids from every parameter group into
+        // the function symbol
         for (AST_NODE *g = curr->third != NULL ? curr->third->next : NULL;
              g != NULL; g = g->next) {
           for (AST_NODE *p = g->left; p != NULL; p = p->next, idx++) {
@@ -712,9 +727,8 @@ static void collect_global_functions(AST_NODE *root,
   }
 }
 
-// druhy pruchod ast, samotna kontrola semantiky, odvozovani typu, kontrola
-// kompatibility, kontrola return, kontrola volani funkci (chyby 3, 4, 5, 6, 7,
-// 10)
+// second AST pass: semantic checks, type inference, compatibility checks,
+// return checks, and function call checks (errors 3, 4, 5, 6, 7, 10)
 static DATA_TYPE analyze_expression(AST_NODE *expr,
                                     semantic_context_t *context);
 static DATA_TYPE analyze_function_call(AST_NODE *call,
@@ -725,8 +739,8 @@ static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context,
                                bool create_scope, bool value_needed,
                                bool *guaranteed_return);
 
-/* Zkontroluje definici funkce, parametry, tělo a odvodí/ověří návratový typ
- * (chyby 4, 6, 10) */
+/* checks the function definition, parameters, body, and infers or verifies the
+ * return type (errors 4, 6, 10) */
 static void analyze_function_def(AST_NODE *func_node,
                                  semantic_context_t *context) {
   if (func_node == NULL || func_node->type != NODE_FUNC_DEF) {
@@ -747,18 +761,18 @@ static void analyze_function_def(AST_NODE *func_node,
     return;
   }
   if (fn_info->analyzing) {
-    // Rekurzivní funkce potřebuje explicitní návratový typ, jinak by odvození
-    // nebylo jednoznačné.
+    // recursive functions need an explicit return type, otherwise inference
+    // would be ambiguous
     error_exit(ERROR_SEM_TYPE, func_node->line, func_node->name,
                "Recursive function needs an explicit return type.");
   }
   fn_info->analyzing = true;
   context->current_func = fn_info;
   context->in_function = true;
-  // Tělo funkce začíná novým rozsahem, který obsahuje její parametry.
+  // the function body starts with a fresh scope containing its parameters
   newScope(context);
 
-  // Vložení formálních parametrů do scope funkce jako nemodifikovatelné
+  // inserts formal parameters into the function scope as immutable values
   // (is_const = true)
   for (size_t i = 0; i < fn_info->param_count; i++) {
     if (is_variable_declared(&context->current_scope->symtable,
@@ -799,10 +813,10 @@ static void analyze_function_def(AST_NODE *func_node,
     }
   }
 
-  // Pravidla pro návratový typ (sekce 2.3 specifikace).
+  // checks the return type rules (section 2.3 of the specification)
   if (!fn_info->explicit_return) {
     func_node->data_type = body_type;
-    // Implicitní návratový typ se odvodí z posledního výrazu těla.
+    // the implicit return type is inferred from the last expression of the body
     fn_info->data_type = body_type; // Odvození návratového typu
     if (func_node->left != NULL &&
         (body_type == DATA_LIST || body_type == DATA_CLASS)) {
@@ -815,8 +829,8 @@ static void analyze_function_def(AST_NODE *func_node,
       fn_info->elem_type = type_ref_elem(fn_info->type_ref);
     }
   } else if (fn_info->data_type != DATA_UNIT) {
-    // Explicitní návratový typ jiný než Unit: pokud není zaručen return, musí
-    // sedět typ posledního výrazu
+    // explicit return type other than Unit: without a guaranteed return, the
+    // last expression type must match
     if (!guaranteed_return) {
       bool needs_conv = false;
       if (!is_type_compatible(fn_info->data_type, body_type, &needs_conv)) {
@@ -834,6 +848,7 @@ static void analyze_function_def(AST_NODE *func_node,
   context->in_function = false;
 }
 
+// infers the return type of a function that has not been analyzed yet
 static void infer_return_type(symbol_info_t *fn, semantic_context_t *context) {
   if (fn->fn_node != NULL && !fn->explicit_return && !fn->is_defined) {
     semantic_context_t callee = {.global_symtable = context->global_symtable};
@@ -841,8 +856,8 @@ static void infer_return_type(symbol_info_t *fn, semantic_context_t *context) {
   }
 }
 
-/* Zpracuje val/var definici proměnné (chyba 4 při redefinici v aktuálním bloku,
- * chyba 6 při neshodě typů) */
+/* processes a val/var variable definition (error 4 for redefinition in the
+ * current block, error 6 for a type mismatch) */
 static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
   if (is_variable_declared(&context->current_scope->symtable, var_node->name)) {
     error_exit(ERROR_SEM_REDEF, var_node->line, var_node->name,
@@ -857,8 +872,8 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
     var_node->data_type = declared_ref->data_type;
   }
 
-  // Deklarace bez inicializace si ponechá explicitní typ, nebo zůstane neznámá
-  // až do použití.
+  // a declaration without an initializer keeps its explicit type, or remains
+  // unknown until later use
   if (var_node->left == NULL) {
     symbol_info_t *var_sym = create_var_symbol(
         var_node->name, var_node->data_type, var_node->is_const, var_node->id);
@@ -879,11 +894,11 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
   AST_NODE *final_ref = declared_ref;
   DATA_TYPE final_type = init_type;
   DATA_TYPE final_elem = init_elem;
-  // Po ověření kompatibility vyhrává deklarovaný typ nad odvozeným z
-  // inicializace.
+  // the declared type wins over the inferred initializer type after
+  // compatibility is verified
   if (declared_ref != NULL) {
-    // Kompatibilita se ověří a případná konverze Int -> Double se označí pro
-    // generátor.
+    // the compatibility check also records whether an Int-to-Double conversion
+    // is needed
     if (!coerce_value_expr(var_node->left, declared_ref, context)) {
       error_exit(ERROR_SEM_TYPE, var_node->line, var_node->name,
                  "Variable type mismatch.");
@@ -903,8 +918,8 @@ static void analyze_var_def(AST_NODE *var_node, semantic_context_t *context) {
   var_sym->type_ref = final_ref;
   symtableInsert(&context->current_scope->symtable, var_node->name, var_sym);
 }
-/* Zpracuje přiřazení id = rhs (chyba 3 nedefinovaná, chyba 7 zápis do
- * val/parametru, chyba 6 typ) */
+/* processes an id = rhs assignment (error 3 undefined, error 7 assignment to
+ * val/parameter, error 6 type mismatch) */
 static void analyze_assign(AST_NODE *assign_node, semantic_context_t *context) {
   if (assign_node == NULL || assign_node->type != NODE_ASSIGN) {
     error_exit(ERROR_INTERNAL, 0, "Invalid assignment node.",
@@ -931,7 +946,8 @@ static void analyze_assign(AST_NODE *assign_node, semantic_context_t *context) {
   assign_node->left->id = var_item->id;
 
   if (assign_node->right == NULL) {
-    // Přiřazení bez pravé strany je po kontrolách cíle v pořádku.
+    // an assignment without a right-hand side is already valid after the target
+    // checks above
     return;
   }
   AST_NODE *prev_expected = context->expected_type;
@@ -949,8 +965,8 @@ static void analyze_assign(AST_NODE *assign_node, semantic_context_t *context) {
   }
 }
 
-/* Zpracuje if-else (podmínka Boolean, oba bloky nové scopes, pravidla returnu)
- */
+/* processes if-else (Boolean condition, new scopes for both blocks, return
+ * rules) */
 static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context,
                             bool value_needed, bool *guaranteed_return) {
   DATA_TYPE cond_type = analyze_expression(if_node->left, context);
@@ -963,14 +979,14 @@ static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context,
   bool then_ret = false;
   bool else_ret = false;
 
-  // Obě větve se analyzují ve vlastních rozsazích.
+  // both branches are analyzed in separate scopes
   DATA_TYPE then_type =
       analyze_block(if_node->right, context, true, value_needed, &then_ret);
   DATA_TYPE else_type =
       analyze_block(if_node->third, context, true, value_needed, &else_ret);
 
   if (guaranteed_return != NULL) {
-    // If zaručí návrat jen tehdy, když ho zaručí obě větve.
+    // an if statement guarantees a return only when both branches guarantee one
     *guaranteed_return = (then_ret && else_ret);
   }
 
@@ -988,7 +1004,7 @@ static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context,
     return expected->data_type;
   }
 
-  // Bez očekávaného typu se výsledný typ hledá z obou větví.
+  // without an expected type, the result type is derived from both branches
   DATA_TYPE result = DATA_UNIT;
   if (value_needed) {
     if (then_ret || then_type == else_type) {
@@ -999,7 +1015,7 @@ static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context,
                (then_type == DATA_DOUBLE && else_type == DATA_INT)) {
       result = DATA_DOUBLE;
     } else if (then_type == DATA_NONE || else_type == DATA_NONE) {
-      // Nevyřešená větev nechá celý výraz nevyřešený.
+      // an unresolved branch keeps the whole conditional unresolved
       result = DATA_NONE;
     } else {
       error_exit(ERROR_SEM_TYPE, if_node->line, "if",
@@ -1027,7 +1043,8 @@ static DATA_TYPE analyze_if(AST_NODE *if_node, semantic_context_t *context,
   return result;
 }
 
-/* Zpracuje while (podmínka Boolean, tělo nový scope, výsledek cyklu je Unit) */
+/* processes while (Boolean condition, new scope for the body, loop result is
+ * Unit) */
 static void analyze_while(AST_NODE *while_node, semantic_context_t *context) {
   DATA_TYPE cond_type = analyze_expression(while_node->left, context);
   if (cond_type != DATA_BOOL && cond_type != DATA_NONE) {
@@ -1042,12 +1059,12 @@ static void analyze_while(AST_NODE *while_node, semantic_context_t *context) {
   bool body_ret = false;
   analyze_block(while_node->right, context, true, false, &body_ret);
 
-  // Stav cyklu nesmí uniknout do okolního příkazu.
+  // loop analysis must not leak the loop state into the surrounding statement
   context->in_loop = prev_in_loop;
 }
 
-/* Zpracuje příkaz return (kontrola návratového typu, samostatný return jen pro
- * Unit, chyby 6, 10) */
+/* processes a return statement (return type check, bare return only for Unit,
+ * errors 6, 10) */
 static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
   if (!context->in_function || context->current_func == NULL) {
     error_exit(ERROR_SEM_OTHER, ret_node->line, "return",
@@ -1061,7 +1078,7 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
     return;
   }
 
-  // Samostatný return bez výrazu
+  // bare return without an expression
   if (ret_node->left == NULL) {
     if (context->current_func->data_type != DATA_UNIT) {
       error_exit(ERROR_SEM_OTHER, ret_node->line, "return",
@@ -1071,7 +1088,7 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
     return;
   }
 
-  // Return s výrazem nebo voláním funkce
+  // return with an expression or function call
   AST_NODE *prev_expected = context->expected_type;
   if (context->current_func->data_type != DATA_UNIT) {
     context->expected_type = context->current_func->type_ref;
@@ -1081,10 +1098,11 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
              : analyze_expression(ret_node->left, context));
   context->expected_type = prev_expected;
 
-  // U explicitního Unit se hodnota vyhodnotí a zahodí (pravidlo 4 v sekci 2.3).
+  // for explicit Unit, the value is evaluated and discarded (rule 4 in
+  // section 2.3)
   if (context->current_func->data_type == DATA_UNIT) {
-    // Unit funkce výraz vyhodnotí i tak, aby odhalila neexistující názvy a
-    // špatná volání.
+    // Unit functions still analyze the expression so undefined names and
+    // invalid calls are detected
     return;
   }
 
@@ -1096,7 +1114,8 @@ static void analyze_return(AST_NODE *ret_node, semantic_context_t *context) {
   }
 }
 
-/* Zpracuje volání funkce jako příkaz nebo výraz na pravé straně (chyby 3, 5) */
+/* processes a function call as a statement or right-hand-side expression
+ * (errors 3, 5) */
 static size_t call_group_count(AST_NODE *call) {
   if (call->arg_groups != NULL) {
     return (size_t)call->arg_groups->param_groups;
@@ -1104,6 +1123,7 @@ static size_t call_group_count(AST_NODE *call) {
   return call->has_parens ? 1 : 0;
 }
 
+// counts arguments in a chain
 static size_t arg_chain_count(AST_NODE *arg) {
   size_t count = 0;
   for (; arg != NULL; arg = arg->next) {
@@ -1112,6 +1132,7 @@ static size_t arg_chain_count(AST_NODE *arg) {
   return count;
 }
 
+// splits a call into the part before an index and the indexing itself
 static DATA_TYPE split_index_call(AST_NODE *call, size_t keep_groups,
                                   semantic_context_t *context) {
   AST_NODE *base = ast_create(call->left, NULL, NULL, NODE_CALL);
@@ -1185,6 +1206,7 @@ static DATA_TYPE split_index_call(AST_NODE *call, size_t keep_groups,
   return call->data_type;
 }
 
+// analyzes an argument and checks its type
 static bool analyze_argument(AST_NODE *arg, AST_NODE *type,
                              semantic_context_t *context) {
   AST_NODE *previous_expected = context->expected_type;
@@ -1194,6 +1216,7 @@ static bool analyze_argument(AST_NODE *arg, AST_NODE *type,
   return coerce_value_expr(arg, type, context);
 }
 
+// checks the number and types of list method arguments
 static void check_list_method_args(AST_NODE *call, size_t count,
                                    semantic_context_t *context) {
   if (!call->has_parens || arg_chain_count(call->third) != count) {
@@ -1208,6 +1231,7 @@ static void check_list_method_args(AST_NODE *call, size_t count,
   }
 }
 
+// analyzes a function call, method call, constructor or indexing
 static DATA_TYPE analyze_function_call(AST_NODE *call,
                                        semantic_context_t *context) {
   if (call->is_static_call) {
@@ -1270,8 +1294,8 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
     return DATA_LIST;
   }
   if (call->is_method) {
-    // Nejdřív se analyzují příjemce a argumenty metody, pak se určí návratový
-    // typ.
+    // method receivers and arguments are analyzed first, then the built-in
+    // method result type is selected
     if (strchr(call->name, '$') != NULL) {
       return call->data_type;
     }
@@ -1384,7 +1408,8 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
       result = DATA_DOUBLE;
     }
 
-    // Návratový typ metody se určí podle jejího jména až po kontrole argumentů.
+    // method return types are determined by the supported method name after all
+    // arguments are checked
     if (result != DATA_NONE) {
       size_t groups = call_group_count(call);
       size_t expected_groups = method_args == 0 ? 0 : 1;
@@ -1603,7 +1628,7 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
     call->type_ref = fn->type_ref;
     return DATA_CLASS;
   }
-  // Obyčejná volání se hledají v globální tabulce funkcí.
+  // ordinary calls resolve through the global function table
   if (fn == NULL || fn->kind != SYM_FUNC || fn->is_extension) {
     error_exit(ERROR_SEM_UNDEF, call->line, call->name,
                "Call to undefined function.");
@@ -1628,8 +1653,8 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
     }
   }
 
-  // List přijímá libovolný počet výrazů, takže obchází běžné počítání
-  // parametrů.
+  // List accepts any number of expressions and therefore bypasses ordinary
+  // parameter counting
   if (strcmp(fn->name, "List") == 0) {
     if (call_group_count(call) > 1) {
       return split_index_call(call, 1, context);
@@ -1692,13 +1717,14 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
     }
   }
 
-  // print a toStr přijímají libovolný výraz, ostatní funkce vyžadují shodu
-  // typů.
+  // print and toStr accept any expression, while other functions require
+  // matching parameter types
   bool is_any_builtin = (fn->is_builtin && (strcmp(fn->name, "print") == 0 ||
                                             strcmp(fn->name, "toStr") == 0));
 
   size_t idx = 0;
-  // Argumenty se kontrolují v pořadí, v jakém jsou zapsané.
+  // argument expressions are checked in source order against the corresponding
+  // parameter
   if (call->arg_groups != NULL) {
     for (AST_NODE *g = call->arg_groups->next; g != NULL; g = g->next) {
       for (AST_NODE *arg = g->left; arg != NULL; arg = arg->next, idx++) {
@@ -1736,6 +1762,7 @@ static DATA_TYPE analyze_function_call(AST_NODE *call,
   return fn->data_type;
 }
 
+// analyzes a match pattern and introduces its bindings
 static DATA_TYPE analyze_pattern(AST_NODE *pat, semantic_context_t *context) {
   if (pat == NULL) {
     return DATA_NONE;
@@ -1799,8 +1826,8 @@ static DATA_TYPE analyze_pattern(AST_NODE *pat, semantic_context_t *context) {
   return DATA_NONE;
 }
 
-/* Rekurzivně vyhodnotí datový typ výrazu a označí implicitní konverzi Int ->
- * Double (chyba 6) */
+/* recursively evaluates the expression data type and marks implicit Int ->
+ * Double conversion (error 6) */
 static DATA_TYPE analyze_expression(AST_NODE *expr,
                                     semantic_context_t *context) {
   if (expr == NULL) {
@@ -1903,7 +1930,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
     return analyze_if(expr, context, true, NULL);
 
   case NODE_RANGE: {
-    // Hranice rozsahu se kontrolují rekurzivně, výsledkem je seznam Intů.
+    // range operands are checked recursively, the result is a list of Ints
     DATA_TYPE from_t = DATA_NONE;
     DATA_TYPE to_t = DATA_NONE;
     DATA_TYPE step_t = DATA_NONE;
@@ -1935,7 +1962,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
   }
 
   case NODE_INTERP:
-    // Literální části interpolace není potřeba analyzovat, vnořené výrazy ano.
+    // literal interpolation parts need no semantic analysis, but embedded
+    // expressions do
     for (AST_NODE *part = expr->left; part != NULL; part = part->next) {
       if (part->type != NODE_LITERAL) {
         analyze_expression(part, context);
@@ -1945,8 +1973,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
     return DATA_STRING;
 
   case NODE_IDENT: {
-    // Identifikátor se nejdřív hledá jako lokální proměnná, pak jako funkce bez
-    // argumentů.
+    // an identifier first resolves as a local variable, then as a zero-argument
+    // function reference
     symbol_info_t *var = findInScope(context, expr->name);
     if (var == NULL || var->kind != SYM_VAR) {
       symbol_info_t *fn = (symbol_info_t *)symtableSearch(
@@ -1957,7 +1985,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
                      "Function requires an argument list.");
           return DATA_UNIT;
         }
-        // Samotné jméno funkce se reprezentuje jako volání bez argumentů.
+        // a bare function name is represented as a call with no arguments
         expr->type = NODE_CALL;
         expr->third = NULL;
         expr->is_method = false;
@@ -1981,8 +2009,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
 
   case NODE_UNOP: {
     DATA_TYPE op_type = analyze_expression(expr->left, context);
-    // Logická negace je jen pro Boolean, unární aritmetika zachovává číselný
-    // typ.
+    // logical negation is Boolean-only; unary arithmetic operators preserve the
+    // numeric operand type
     if (expr->op_type == OP_NOT) {
       if (op_type != DATA_BOOL && op_type != DATA_NONE) {
         error_exit(ERROR_SEM_TYPE, expr->line, "unary",
@@ -1993,8 +2021,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
       return DATA_BOOL;
     }
     if (op_type == DATA_NONE) {
-      // Neznámý operand zůstane neznámý, aby se nehlásila druhá zavádějící
-      // chyba.
+      // unknown operands remain unknown instead of causing a second misleading
+      // type error
       return DATA_NONE;
     }
     if (expr->op_type == OP_ADD || expr->op_type == OP_SUB) {
@@ -2013,7 +2041,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
     DATA_TYPE left_t = analyze_expression(expr->left, context);
     DATA_TYPE right_t = analyze_expression(expr->right, context);
 
-    // Neznámý operand znemožní spolehlivou kontrolu celého výrazu.
+    // an unknown operand prevents reliable type validation for the whole binary
+    // expression
     if (left_t == DATA_NONE || right_t == DATA_NONE) {
       return DATA_NONE;
     }
@@ -2031,7 +2060,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
       return DATA_UNIT;
 
     case OP_ADD:
-      // Sčítání zároveň spojuje seznamy a řetězce.
+      // addition also implements list concatenation and string concatenation
       if (left_t == DATA_LIST && right_t == DATA_LIST) {
         AST_NODE *left_ref = type_ref_of_expr(expr->left);
         AST_NODE *right_ref = type_ref_of_expr(expr->right);
@@ -2056,8 +2085,8 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
     case OP_DIV:
       if ((left_t == DATA_INT || left_t == DATA_DOUBLE) &&
           (right_t == DATA_INT || right_t == DATA_DOUBLE)) {
-        // Smíšené číselné operandy dají Double, jinak zůstane užší společný
-        // typ.
+        // mixed numeric operands produce Double; otherwise the narrower common
+        // type is preserved
         DATA_TYPE res = (left_t == DATA_DOUBLE || right_t == DATA_DOUBLE)
                             ? DATA_DOUBLE
                             : DATA_INT;
@@ -2071,7 +2100,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
     case OP_TO:
     case OP_UNTIL:
     case OP_BY:
-      // Operátory rozsahu pracují s Inty a výsledkem je seznam Intů.
+      // range operators work with Ints and produce a list of Ints
       if (right_t != DATA_INT && right_t != DATA_NONE) {
         error_exit(ERROR_SEM_TYPE, expr->line, "range",
                    "Range bound must be Int.");
@@ -2139,7 +2168,7 @@ static DATA_TYPE analyze_expression(AST_NODE *expr,
   }
 }
 
-/* Zpracuje jeden příkaz a vrátí jeho výsledný typ */
+/* processes one statement and returns its resulting type */
 static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context,
                                    bool value_needed, bool *guaranteed_return) {
   if (stmt == NULL) {
@@ -2165,7 +2194,7 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context,
   case NODE_RETURN:
     analyze_return(stmt, context);
     if (guaranteed_return != NULL) {
-      // Return ukončuje zbytek řízení.
+      // a return statement terminates the remaining control-flow path
       *guaranteed_return = true;
     }
     return DATA_UNIT;
@@ -2191,8 +2220,8 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context,
                  "For source must be a range or a list.");
       return DATA_UNIT;
     }
-    // Proměnná cyklu a jeho tělo mají vlastní rozsah, který se po analýze
-    // zruší.
+    // the loop variable and its body share a dedicated scope that is removed
+    // after analysis
     newScope(context);
     AST_NODE *loop_ref = NULL;
     if (stmt->left != NULL && stmt->left->type_ref != NULL &&
@@ -2208,8 +2237,8 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context,
       var_sym->elem_type = type_ref_elem(loop_ref);
       symtableInsert(&context->current_scope->symtable, stmt->name, var_sym);
     }
-    // Výrazy guard se vyhodnocují v rozsahu cyklu, ale jejich hodnota se
-    // zahazuje.
+    // the guard expressions are evaluated in the loop scope, but their values
+    // are discarded
     for (AST_NODE *guard = stmt->third; guard != NULL; guard = guard->next) {
       DATA_TYPE guard_t = analyze_expression(guard, context);
       if (guard_t != DATA_BOOL && guard_t != DATA_NONE) {
@@ -2235,7 +2264,8 @@ static DATA_TYPE analyze_statement(AST_NODE *stmt, semantic_context_t *context,
   }
 }
 
-/* Projde řetěz příkazů v bloku (node->next) a vrátí typ posledního příkazu */
+/* traverses the statement chain in a block (node->next) and returns the last
+ * statement type */
 static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context,
                                bool create_scope, bool value_needed,
                                bool *guaranteed_return) {
@@ -2244,16 +2274,16 @@ static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context,
   }
 
   if (create_scope) {
-    // Volající si může nechat aktuální rozsah, vnořené bloky si vytvářejí
-    // dočasný.
+    // the caller keeps the current scope when requested, while nested blocks
+    // own their temporary scope
     newScope(context);
   }
 
   DATA_TYPE last_type = DATA_UNIT;
   AST_NODE *stmt = (block->type == NODE_BLOCK) ? block->left : block;
 
-  // Vrací se typ posledního příkazu, ale každý return označí blok jako
-  // ukončený.
+  // only the last statement type is returned, while any returning statement
+  // marks the block as returning
   while (stmt != NULL) {
     bool stmt_returns = false;
     last_type = analyze_statement(
@@ -2268,10 +2298,12 @@ static DATA_TYPE analyze_block(AST_NODE *block, semantic_context_t *context,
     freeScope(context);
   }
 
-  // Poslední příkaz určuje hodnotu bloku pro odvození návratového typu.
+  // the final statement determines the block value used for return-type
+  // inference
   return last_type;
 }
 
+// checks whether a function calls itself
 static bool calls_itself(AST_NODE *node, AST_NODE *origin,
                          semantic_context_t *context) {
   for (; node != NULL; node = node->next) {
@@ -2322,24 +2354,25 @@ static bool calls_itself(AST_NODE *node, AST_NODE *origin,
   return false;
 }
 
-/* Hlavní funkce sémantické analýzy, provádí průchody nad AST. */
+/* main semantic analysis function, performs passes over the AST */
 void semantic_analyze(AST_NODE *root) {
   semantic_context_t context;
-  // Inicializace kontextu na nuly.
+  // initialize the semantic context to zero
   memset(&context, 0, sizeof(semantic_context_t));
 
   if (!symtableInit(&context.global_symtable)) {
-    // Chyba už je ošetřená v symtableInit, takže jen vrátíme.
+    // error exit is built into symtableInit, so we just return here
     return;
   }
 
   register_builtin_functions(&context);
   register_type_names(root, &context);
   resolve_program_types(root, &context);
-  // První průchod: hlavičky funkcí, redefinice a kontrola @main.
+  // first pass: collects function headers, checks for redefinitions, and
+  // verifies @main
   collect_global_functions(root, &context);
 
-  // 2. průchod: kontrola těl všech funkcí
+  // second pass: checks the bodies of all functions
   AST_NODE *curr =
       (root != NULL && root->type == NODE_PROGRAM) ? root->left : root;
   while (curr != NULL) {
@@ -2357,15 +2390,15 @@ void semantic_analyze(AST_NODE *root) {
     }
   }
 
-  // Úklid globální tabulky symbolů
+  // cleans up the global symbol table
   size_t size_of_global_symtable = context.global_symtable.size;
   for (size_t i = 0; i < size_of_global_symtable; i++) {
     if (context.global_symtable.items[i].status == SLOT_OCCUPIED) {
       symbol_info_t *info =
           (symbol_info_t *)context.global_symtable.items[i].value;
       if (info != NULL) {
-        // Jména a pole parametrů patří jednotlivým symbolům funkcí, uvolní se
-        // před samotným symbolem.
+        // parameter names and arrays belong to each function symbol and must be
+        // released before the symbol itself
         for (size_t p = 0; p < info->param_count; p++) {
           free(info->params[p].name);
         }

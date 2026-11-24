@@ -13,7 +13,6 @@
 
 typedef struct {
   int label_counter;
-  char *function_name;
   DATA_TYPE return_type;
 } Gen;
 
@@ -21,8 +20,6 @@ typedef struct {
  *create from function name and label counter
  */
 int new_label(Gen *gen);
-
-void emit(Gen *gen, char *label);
 
 void emit_string_literal(char *str);
 

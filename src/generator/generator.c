@@ -70,11 +70,13 @@ void lower_members(AST_NODE *root) {
   }
 }
 
+// returns a new label number
 int new_label(Gen *gen) { return gen->label_counter++; }
 
 // writes definition of variables in function right after pushFrame
 static int match_id_counter;
 
+// prints DEFVAR for variables in a node
 void print_defvar(AST_NODE *node) {
   if (node->type == NODE_VAR_DEF) {
     printf("DEFVAR LF@%s$%d\n", node->name, node->id);
@@ -96,6 +98,7 @@ void print_defvar(AST_NODE *node) {
     printf("DEFVAR LF@for_idx$%d\n", node->id);
   }
 }
+// walks the function body and prints DEFVAR for all variables
 void emit_defvars(AST_NODE *node) {
   if (!node)
     return;
@@ -152,6 +155,7 @@ void emit_string_literal(char *str) {
   }
 }
 
+// prints DEFVAR for function parameters
 static void defvar_params(AST_NODE *groups) {
   for (AST_NODE *g = groups; g != NULL; g = g->next) {
     for (AST_NODE *p = g->left; p != NULL; p = p->next) {
@@ -160,6 +164,7 @@ static void defvar_params(AST_NODE *groups) {
   }
 }
 
+// stores parameters from the frame into local variables in reverse order
 static void pop_param_chain(AST_NODE *param) {
   if (param == NULL) {
     return;
@@ -168,6 +173,7 @@ static void pop_param_chain(AST_NODE *param) {
   printf("POPS LF@%s$%d\n", param->name, param->id);
 }
 
+// stores all parameter groups from the frame
 static void pop_params(AST_NODE *groups) {
   if (groups == NULL) {
     return;
@@ -176,6 +182,7 @@ static void pop_params(AST_NODE *groups) {
   pop_param_chain(groups->left);
 }
 
+// processes parameters on function entry
 static void process_params(AST_NODE *groups) {
   if (groups == NULL) {
     return;
@@ -184,6 +191,7 @@ static void process_params(AST_NODE *groups) {
   pop_params(groups->next);
 }
 
+// generates the body of one function
 void gen_function(Gen *gen, AST_NODE *fn) {
   gen->return_type = fn->data_type;
   printf("LABEL $f_%s\n", fn->name);
@@ -218,10 +226,8 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   printf("RETURN\n");
 }
 
+// generates the program header and all functions
 void generator_init(Gen *gen, AST_NODE *root) {
-  //==================
-  // ast_print(root);
-  //====================*/
   printf(".IFJcode26\n");
 
   // finding main function

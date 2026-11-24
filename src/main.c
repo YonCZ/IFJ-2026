@@ -11,6 +11,7 @@
 #include "parser/semantic.h"
 #include "scanner.h"
 
+// nacte vstup, spusti scanner, parser, semantiku a generator
 int main(void) {
   AST_NODE *root = parse_program();
   if (root == NULL) {

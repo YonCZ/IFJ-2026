@@ -13,6 +13,7 @@ Part of project IFJ2026
 
 // function declarations
 
+// computes the djb2 hash of a key and maps it to a table index
 static size_t symtableHash(const char *key, size_t table_size) {
   size_t hash = 5381;
   size_t i = 0;
@@ -23,6 +24,7 @@ static size_t symtableHash(const char *key, size_t table_size) {
   return hash % table_size;
 }
 
+// initializes an empty symbol table
 bool symtableInit(symtable_t *table) {
   if (symtableExists(table)) {
     return true; // already initialized
@@ -42,6 +44,7 @@ bool symtableInit(symtable_t *table) {
   return true; // allocation of empty table successful
 }
 
+// frees the keys and the table memory
 void symtableFree(symtable_t *table) {
   if (symtableExists(table) == false) {
     return; // table does not exist
@@ -64,6 +67,7 @@ void symtableFree(symtable_t *table) {
   table->count = 0;
 }
 
+// doubles the table and rehashes existing items
 static bool symtableResize(symtable_t *table) {
   if (symtableExists(table) == false) {
     return false; // table does not exist
@@ -93,12 +97,12 @@ static bool symtableResize(symtable_t *table) {
   return true;
 }
 
+// checks whether the table is initialized
 bool symtableExists(symtable_t *table) {
   return table != NULL && table->items != NULL;
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// functions for inserting and searching items in the symbol table
+// searches for a value by key, returns NULL when not found
 void *symtableSearch(symtable_t *table, const char *key) {
   size_t index = symtableFindIndex(table, key);
   if (index == (size_t)-1) {
@@ -107,6 +111,7 @@ void *symtableSearch(symtable_t *table, const char *key) {
   return table->items[index].value;
 }
 
+// checks whether the table already contains the key
 bool symtableCheckForDuplicate(symtable_t *table, const char *key) {
   if (symtableExists(table) == false) {
     return false; // table does not exist, so no duplicates
@@ -114,6 +119,7 @@ bool symtableCheckForDuplicate(symtable_t *table, const char *key) {
   return symtableFindIndex(table, key) != (size_t)-1;
 }
 
+// inserts a new key and value, resizing the table if needed
 bool symtableInsert(symtable_t *table, const char *key, void *value) {
   if (symtableExists(table) == false) {
     return false; // table does not exist
@@ -139,8 +145,6 @@ bool symtableInsert(symtable_t *table, const char *key, void *value) {
   table->items[index].value = value;
   table->items[index].status = SLOT_OCCUPIED;
   table->count++;
-  table->items[index].insert_order =
-      table->count; // the order in which the item was inserted into the table
 
   // check if the table needs to be resized
   if (table->count >= SYMTABLE_MAX_LOAD * table->size) {
@@ -151,6 +155,7 @@ bool symtableInsert(symtable_t *table, const char *key, void *value) {
   return true;
 }
 
+// finds the index of a key, returns -1 when not found
 size_t symtableFindIndex(symtable_t *table, const char *key) {
   if (!symtableExists(table) || key == NULL)
     return (size_t)-1;
@@ -158,7 +163,7 @@ size_t symtableFindIndex(symtable_t *table, const char *key) {
   size_t i = start;
   do {
     if (table->items[i].status == SLOT_EMPTY) {
-      return (size_t)-1; // narazili jsme na prazdny slot -> klic v tabulce neni
+      return (size_t)-1; // an empty slot means the key is not in the table
     }
     if (table->items[i].status == SLOT_OCCUPIED &&
         strcmp(table->items[i].key, key) == 0) {

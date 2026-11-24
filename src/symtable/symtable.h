@@ -15,13 +15,11 @@ based on a hash table. The hashing algorithm used is the djb2 algorithm.
 
 #define SYMTABLE_MAX_LOAD 0.75
 
-typedef enum { SLOT_EMPTY, SLOT_OCCUPIED, SLOT_DELETED } symtable_slot_status_t;
+typedef enum { SLOT_EMPTY, SLOT_OCCUPIED } symtable_slot_status_t;
 
 typedef struct {
   char *key;
   void *value;
-  size_t insert_order; // the order in which the item was inserted into the
-                       // table
   symtable_slot_status_t status;
 } symtable_item_t;
 

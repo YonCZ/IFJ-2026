@@ -70,6 +70,7 @@ Token parser_peek_next(void) {
   return tokens[pos + 1];
 }
 
+// Returns the current token and advances to the next one.
 Token parser_advance(void) { return tokens[pos++]; }
 
 // Consumes the current token if it has type t, error 2 otherwise.
@@ -490,6 +491,7 @@ static AST_NODE *parse_match_expr(AST_NODE *subject) {
   return node;
 }
 
+// Skips an expression the precedence parser cannot handle.
 static void skip_expression(void) {
   int depth = 0;
   int ifs = 0;
@@ -611,6 +613,7 @@ static bool precedence_can_parse(void) {
 static AST_NODE *parse_rhs(void);
 static AST_NODE *wrap_expr_stmt(AST_NODE *expr);
 
+// Parses an if expression including its branches.
 static AST_NODE *parse_if_expr(bool in_args) {
   bool prev_in_args = expr_in_args;
   expr_in_args = in_args;
@@ -648,6 +651,7 @@ static AST_NODE *parse_if_expr(bool in_args) {
   return node;
 }
 
+// Parses the right-hand side of an assignment or an expression.
 static AST_NODE *parse_rhs(void) {
   Token t = parser_peek();
   if (t.type == IF_TOKEN) {
@@ -807,8 +811,10 @@ static AST_NODE *parse_interp(void) {
   }
 }
 
+// Parses an interpolated string.
 AST_NODE *parser_parse_interp(void) { return parse_interp(); }
 
+// Parses an if expression.
 AST_NODE *parser_parse_if_expr(bool in_args) { return parse_if_expr(in_args); }
 
 static void parse_mid_item(AST_NODE **head, AST_NODE **tail);
@@ -916,6 +922,7 @@ static AST_NODE *wrap_expr_stmt(AST_NODE *expr) {
   return stmt;
 }
 
+// Parses a simple statement without a block.
 static AST_NODE *parse_simple_stmt(void) {
   switch (parser_peek().type) {
   case VAL_TOKEN:
@@ -940,6 +947,7 @@ static AST_NODE *parse_if_branch(void);
 static AST_NODE *parse_while_body(void);
 static AST_NODE *parse_for_body(void);
 
+// Parses the body of a condition or loop, a block or one statement.
 static AST_NODE *parse_control_body(void) {
   if (parser_peek().type == EOL_TOKEN) {
     parser_advance();
@@ -1000,6 +1008,7 @@ static void parse_mid_item(AST_NODE **head, AST_NODE **tail) {
   parse_line_end(head, tail);
 }
 
+// Parses an if with a condition and an optional else.
 static AST_NODE *parse_if_branch(void) {
   Token kw = parser_advance();
   AST_NODE *cond = parse_rhs();
@@ -1015,11 +1024,13 @@ static AST_NODE *parse_if_branch(void) {
   return node;
 }
 
+// Parses an if as a statement and appends it to the list.
 static void parse_if_stmt(AST_NODE **head, AST_NODE **tail) {
   chain_append(head, tail, parse_if_branch());
   parse_line_end(head, tail);
 }
 
+// Parses a while with a condition and a body.
 static AST_NODE *parse_while_body(void) {
   Token kw = parser_advance();
   AST_NODE *cond = parse_rhs();
@@ -1029,6 +1040,7 @@ static AST_NODE *parse_while_body(void) {
   return node;
 }
 
+// Parses a while as a statement and appends it to the list.
 static void parse_while_stmt(AST_NODE **head, AST_NODE **tail) {
   chain_append(head, tail, parse_while_body());
   parse_line_end(head, tail);
@@ -1093,6 +1105,7 @@ static AST_NODE *make_range(AST_NODE *expr) {
   return ast_range_create(from, to, step, NULL, inclusive);
 }
 
+// Parses a for including its generator, guards and body.
 static AST_NODE *parse_for_body(void) {
   Token kw = parser_advance();
   AST_NODE *node = ast_for_create(NULL, NULL, NULL, NULL, NULL);
@@ -1117,6 +1130,7 @@ static AST_NODE *parse_for_body(void) {
   return node;
 }
 
+// Parses a for as a statement and appends it to the list.
 static void parse_for_stmt(AST_NODE **head, AST_NODE **tail) {
   chain_append(head, tail, parse_for_body());
   parse_line_end(head, tail);

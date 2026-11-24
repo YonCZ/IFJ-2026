@@ -117,12 +117,14 @@ const PrecedenceRel PSA_TABLE[PSA_TABLE_SIZE][PSA_TABLE_SIZE] = {
                REL_LT, REL_LT, REL_LT, REL_LT, REL_LT,  REL_LT,  REL_GT, REL_LT,
                REL_GT, REL_LT, REL_LT, REL_LT, REL_ERR, REL_ERR, REL_ERR},
 };
+// checks whether the token ends an expression
 static bool is_expression_end(Tokens type) {
   return type == SEMICOLON_TOKEN || type == THEN_TOKEN || type == ELSE_TOKEN ||
          type == DO_TOKEN || type == EOL_TOKEN || type == MATCH_TOKEN ||
          type == ARROW_FAT_TOKEN || type == RBRACE_TOKEN || type == EOF_TOKEN;
 }
 
+// converts a token to a precedence analysis symbol
 static PSASymbol token_to_symbol(Token token, bool expecting_operand) {
   switch (token.type) {
   case PLUS_TOKEN:
@@ -178,13 +180,13 @@ static PSASymbol token_to_symbol(Token token, bool expecting_operand) {
   case EOF_TOKEN:
     return PSA_DOLLAR;
   default:
-    // Pokud token není platný operand výrazu, skončíme chybou.
+    // if the token is not a valid expression operand, exit with an error
     error_exit(ERROR_SYN, token.line, "Invalid token in precedence expression");
     return PSA_DOLLAR;
   }
 }
 
-// Vytvoří list AST podle typu tokenu.
+// creates an AST leaf based on the token type
 static AST_NODE *create_leaf(Token token) {
   AST_NODE *node;
 
@@ -219,17 +221,17 @@ static AST_NODE *create_leaf(Token token) {
     return NULL;
   }
 
-  node->line = token.line; // Uložíme řádek kvůli hlášením chyb.
+  node->line = token.line; // store the line for error reporting
   return node;
 }
 
-// Ověří, zda je symbol unární operátor.
+// checks if the symbol is a unary operator
 static bool is_unary_symbol(PSASymbol symbol) {
   return symbol == PSA_UN_PLUS || symbol == PSA_UN_MINUS ||
          symbol == PSA_UN_NOT;
 }
 
-// Převede symbol PSA na operátor OP_TYPE.
+// converts a PSA symbol to an OP_TYPE operator
 static bool symbol_to_operator(PSASymbol symbol, OP_TYPE *operator) {
   switch (symbol) {
   case PSA_PLUS:
@@ -285,7 +287,7 @@ static bool symbol_to_operator(PSASymbol symbol, OP_TYPE *operator) {
   }
 }
 
-// Vrátí operátor pro unární symbol.
+// returns the operator for a unary symbol
 static OP_TYPE unary_operator(PSASymbol symbol) {
   switch (symbol) {
   case PSA_UN_PLUS:
@@ -299,17 +301,17 @@ static OP_TYPE unary_operator(PSASymbol symbol) {
   }
 }
 
+// reduces the rule on top of the stack to one AST node
 static void reduce_stack(Stack *stack, int line) {
   StackSymbol handle[4]; // handle is the right side of the rule
   size_t handle_size = 0;
   StackSymbol symbol;
   bool marker_found = false;
 
-  // Provede redukci podle pravidla na vrcholu zásobníku.
   while (!stack_is_empty(stack)) {
     symbol = stack_pop(stack);
     if (symbol.kind == STACK_MARKER) {
-      // Marker ukončuje pravidlo, na které se redukce aplikuje.
+      // the marker ends the rule the reduction applies to
       marker_found = true;
       break;
     }
@@ -321,7 +323,7 @@ static void reduce_stack(Stack *stack, int line) {
   }
 
   if (!marker_found) {
-    // Bez markeru je výraz neplatný.
+    // without a marker the expression is invalid
     error_exit(ERROR_SYN, line, "Missing precedence marker");
     return;
   }
@@ -360,6 +362,7 @@ static void reduce_stack(Stack *stack, int line) {
                         .kind = STACK_NONTERMINAL, .token = 0, .node = node});
 }
 
+// handles a line break and checks that the continuation is indented
 static Token consume_continuation(Token eol) {
   parser_advance();
   Token indent = parser_advance();
@@ -371,6 +374,7 @@ static Token consume_continuation(Token eol) {
   return parser_peek();
 }
 
+// checks the token type and advances the parser, otherwise reports an error
 static Token expect_token(Tokens type) {
   Token tok = parser_peek();
   if (tok.type != type) {
@@ -380,6 +384,7 @@ static Token expect_token(Tokens type) {
   return tok;
 }
 
+// pops the operand for a postfix operation from the stack
 static AST_NODE *pop_postfix_operand(Stack *stack, int line) {
   StackSymbol top_terminal = stack_top_terminal(stack);
   if (top_terminal.kind == STACK_TERMINAL &&
@@ -401,6 +406,7 @@ static AST_NODE *pop_postfix_operand(Stack *stack, int line) {
   return node;
 }
 
+// counts arguments in a chain
 static int count_arg_chain(AST_NODE *arg) {
   int count = 0;
   for (; arg != NULL; arg = arg->next) {
@@ -409,8 +415,8 @@ static int count_arg_chain(AST_NODE *arg) {
   return count;
 }
 
-// Zpracuje argumenty volání oddělené čárkou, čárka na konci je povolená jen
-// před zalomením řádku.
+// parses comma-separated call arguments and allows a trailing comma only before
+// a line break
 static AST_NODE *parse_call_args(void) {
   expect_token(LPAR_TOKEN);
   if (parser_peek().type == RPAR_TOKEN) {
@@ -443,7 +449,8 @@ static AST_NODE *parse_call_args(void) {
   }
 }
 
-// Zpracuje výraz podle precedenční tabulky a staví AST na zásobníku.
+// parses expressions with the precedence table while building the AST on the
+// stack
 static AST_NODE *precedence_parse_internal(bool in_args) {
   Token input = parser_peek();
   Stack *stack = stack_init();
@@ -455,8 +462,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
                                   .node = NULL});
 
   while (true) {
-    // Odsazené zalomení řádku může pokračovat ve výrazu, pokud ještě čekáme
-    // operand.
+    // an indented line break can continue an expression when an operand is
+    // still expected
     if (input.type == EOL_TOKEN && expecting_operand) {
       input = consume_continuation(input);
       continue;
@@ -506,7 +513,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
       continue;
     }
 
-    // Závorka za operandem je volání funkce, ne seskupení výrazu.
+    // a parenthesis after an operand is a function call, not a grouping
+    // expression
     if (!expecting_operand && input.type == LPAR_TOKEN) {
       AST_NODE *callee = pop_postfix_operand(stack, input.line);
       AST_NODE *params = parse_call_args();
@@ -553,8 +561,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
       continue;
     }
 
-    // Tečka za operandem začíná volání metody, jejímž příjemcem je aktuální
-    // uzel AST.
+    // a dot after an operand starts a method call whose receiver is the current
+    // AST node
     if (!expecting_operand && input.type == DOT_TOKEN) {
       int line = input.line;
       parser_advance();
@@ -580,8 +588,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
       break;
     }
 
-    // Tabulka rozhoduje, zda se má vstup posunout, zredukovat pravidlo, nebo
-    // ohlásit chybu.
+    // the table decides whether to shift the input, reduce a grammar handle, or
+    // report an error
     switch (PSA_TABLE[top_symbol][input_symbol]) {
     case REL_LT:
       // Shift operation
@@ -642,6 +650,8 @@ static AST_NODE *precedence_parse_internal(bool in_args) {
   return root;
 }
 
+// parses a whole expression with precedence analysis
 AST_NODE *precedence_parse(void) { return precedence_parse_internal(false); }
 
+// parses one call argument
 AST_NODE *precedence_parse_arg(void) { return precedence_parse_internal(true); }
