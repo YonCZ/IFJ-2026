@@ -6,12 +6,12 @@
 
 #ifndef SCANNER_H
 #define SCANNER_H
-#include <stdio.h>
 #include "token.h"
+#include <stdio.h>
 
-//zavola se funkce na scanner
+// zavola se funkce na scanner
 Token get_token(FILE *f);
-//uvolneni
+// uvolneni
 void scanner_free();
 
 #endif

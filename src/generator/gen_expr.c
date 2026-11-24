@@ -20,37 +20,36 @@
 // puts one value on stack
 //===========================
 
-
-void literal(Gen *gen, AST_NODE *node, char* func_name) {
+void literal(AST_NODE *node, char *func_name) {
   printf("%s ", func_name);
   switch (node->data_type) {
-    case DATA_STRING:
-      emit_string_literal(gen, node->sval);
-      break;
-    case DATA_INT:
-      printf("int@%lld", node->ival);
-      break;
-    case DATA_BOOL:
-      printf("bool@%s", node->ival?"true":"false");
-      break;
-    case DATA_DOUBLE:
-      printf("float@%a", node->dval);
-      break;
-    case DATA_UNIT:
-      printf("nil@nil");
-      break;
-    default:
-      error_exit(ERROR_INTERNAL, node->line, "Literal write");
+  case DATA_STRING:
+    emit_string_literal(node->sval);
+    break;
+  case DATA_INT:
+    printf("int@%lld", node->ival);
+    break;
+  case DATA_BOOL:
+    printf("bool@%s", node->ival ? "true" : "false");
+    break;
+  case DATA_DOUBLE:
+    printf("float@%a", node->dval);
+    break;
+  case DATA_UNIT:
+    printf("nil@nil");
+    break;
+  default:
+    error_exit(ERROR_INTERNAL, node->line, "Literal write");
   }
   printf("\n");
 }
 
 void pop_to_val(AST_NODE *node) {
-  printf("POPS LF@%s$%d\n",node->name, node->id);
+  printf("POPS LF@%s$%d\n", node->name, node->id);
 }
 
 void push_to_val(AST_NODE *node) {
-  printf("PUSHS LF@%s$%d\n",node->name, node->id);
+  printf("PUSHS LF@%s$%d\n", node->name, node->id);
 }
 
 static void gen_list_constructor(Gen *gen, AST_NODE *node) {
@@ -130,7 +129,8 @@ static void gen_range_list(Gen *gen, AST_NODE *node) {
 }
 static void gen_call_args(Gen *gen, AST_NODE *call) {
   if (call->arg_groups != NULL) {
-    for (AST_NODE *group = call->arg_groups->next; group != NULL; group = group->next) {
+    for (AST_NODE *group = call->arg_groups->next; group != NULL;
+         group = group->next) {
       for (AST_NODE *param = group->left; param != NULL; param = param->next) {
         gen_expr(gen, param);
       }
@@ -144,16 +144,23 @@ static void gen_call_args(Gen *gen, AST_NODE *call) {
 
 static const char *basic_pattern_type(DATA_TYPE type) {
   switch (type) {
-    case DATA_INT: return "int";
-    case DATA_DOUBLE: return "float";
-    case DATA_STRING: return "string";
-    case DATA_BOOL: return "bool";
-    case DATA_UNIT: return "nil";
-    default: return "nil";
+  case DATA_INT:
+    return "int";
+  case DATA_DOUBLE:
+    return "float";
+  case DATA_STRING:
+    return "string";
+  case DATA_BOOL:
+    return "bool";
+  case DATA_UNIT:
+    return "nil";
+  default:
+    return "nil";
   }
 }
 
-static void gen_literal_pattern(Gen *gen, AST_NODE *pattern, const char *value, int fail_label) {
+static void gen_literal_pattern(Gen *gen, AST_NODE *pattern, const char *value,
+                                int fail_label) {
   printf("TYPE LF@tmp1 %s\n", value);
   if (pattern->data_type == DATA_INT || pattern->data_type == DATA_DOUBLE) {
     int int_label = new_label(gen);
@@ -184,18 +191,19 @@ static void gen_literal_pattern(Gen *gen, AST_NODE *pattern, const char *value, 
     printf("LABEL xMATCH$%d\n", done_label);
     return;
   }
-  printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@%s\n",
-         fail_label, basic_pattern_type(pattern->data_type));
+  printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@%s\n", fail_label,
+         basic_pattern_type(pattern->data_type));
   if (pattern->data_type == DATA_UNIT) {
     return;
   }
   printf("PUSHS %s\n", value);
-  literal(gen, pattern, "PUSHS");
+  literal(pattern, "PUSHS");
   printf("EQS\n");
   printf("PUSHS bool@false\n");
   printf("JUMPIFEQS xMATCH$%d\n", fail_label);
 }
-static void gen_type_pattern(Gen *gen, AST_NODE *type, const char *value, int fail_label) {
+static void gen_type_pattern(Gen *gen, AST_NODE *type, const char *value,
+                             int fail_label) {
   if (type == NULL) {
     return;
   }
@@ -219,15 +227,17 @@ static void gen_type_pattern(Gen *gen, AST_NODE *type, const char *value, int fa
       printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@$list:%s\n", fail_label, tag);
       free(tag);
     } else {
-      printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@$class:%s\n", fail_label, type->name);
+      printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@$class:%s\n", fail_label,
+             type->name);
     }
     return;
   }
-  printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@%s\n",
-         fail_label, basic_pattern_type(type->data_type));
+  printf("JUMPIFNEQ xMATCH$%d LF@tmp1 string@%s\n", fail_label,
+         basic_pattern_type(type->data_type));
 }
 
-static void gen_pattern_test(Gen *gen, AST_NODE *pattern, int match_id, int fail_label) {
+static void gen_pattern_test(Gen *gen, AST_NODE *pattern, int match_id,
+                             int fail_label) {
   if (pattern == NULL || pattern->type == NODE_WILDCARD) {
     return;
   }
@@ -243,12 +253,14 @@ static void gen_pattern_test(Gen *gen, AST_NODE *pattern, int match_id, int fail
   } else if (pattern->type == NODE_CALL) {
     gen_type_pattern(gen, pattern->type_ref, subject, fail_label);
     int field = 1;
-    for (AST_NODE *arg = pattern->third; arg != NULL; arg = arg->next, field++) {
+    for (AST_NODE *arg = pattern->third; arg != NULL;
+         arg = arg->next, field++) {
       if (arg->type == NODE_LITERAL) {
         printf("ARRAYGET LF@tmp3 %s int@%d\n", subject, field);
         gen_literal_pattern(gen, arg, "LF@tmp3", fail_label);
       } else if (arg->type == NODE_IDENT && arg->is_binding) {
-        printf("ARRAYGET LF@%s$%d %s int@%d\n", arg->name, arg->id, subject, field);
+        printf("ARRAYGET LF@%s$%d %s int@%d\n", arg->name, arg->id, subject,
+               field);
       }
     }
   }
@@ -334,335 +346,328 @@ void gen_expr(Gen *gen, AST_NODE *node) {
     return;
   }
   switch (node->type) {
-    case NODE_CALL:
-      if (node->is_index) {
-        if (node->left != NULL) {
-          gen_expr(gen, node->left);
-        } else {
-          printf("PUSHS LF@%s$%d\n", node->name, node->id);
-        }
+  case NODE_CALL:
+    if (node->is_index) {
+      if (node->left != NULL) {
+        gen_expr(gen, node->left);
+      } else {
+        printf("PUSHS LF@%s$%d\n", node->name, node->id);
+      }
+      gen_expr(gen, node->third);
+      printf("CALL $b_list_get\n");
+      break;
+    }
+    if (node->is_field) {
+      gen_expr(gen, node->left);
+      printf("POPS LF@tmp1\n");
+      printf("ARRAYGET LF@tmp2 LF@tmp1 int@%d\n", node->field_index);
+      printf("PUSHS LF@tmp2\n");
+      break;
+    }
+    if (node->is_ctor) {
+      gen_case_constructor(gen, node);
+      break;
+    }
+    if (node->is_static_call) {
+      size_t count = 0;
+      for (AST_NODE *arg = node->third; arg != NULL; arg = arg->next) {
+        gen_expr(gen, arg);
+        count++;
+      }
+      if (count == 2) {
+        printf("PUSHS int@1\n");
+      }
+      printf("PUSHS int@0\n");
+      printf("CALL $b_list_range\n");
+      break;
+    }
+    if (node->is_method && node->left != NULL && node->name != NULL &&
+        node->third != NULL && node->third->is_function_ref) {
+      if (strcmp(node->name, "filter") == 0) {
+        gen_list_predicate(gen, node, 0);
+        break;
+      }
+      if (strcmp(node->name, "takeWhile") == 0) {
+        gen_list_predicate(gen, node, 1);
+        break;
+      }
+      if (strcmp(node->name, "dropWhile") == 0) {
+        gen_list_predicate(gen, node, 2);
+        break;
+      }
+    }
+    /*===============
+     *PRINT
+     *===============
+     *
+     *only for constants*/
+    if (strcmp(node->name, "print") == 0) {
+      if (node->third->type == NODE_LITERAL &&
+          node->third->data_type == DATA_UNIT) {
+        printf("WRITE string@()\n");
+      } else if (node->third->type == NODE_LITERAL)
+        literal(node->third, "WRITE");
+      // print(x)
+      else if (node->third->data_type == DATA_LIST) {
         gen_expr(gen, node->third);
-        printf("CALL $b_list_get\n");
-        break;
-      }
-      if (node->is_field) {
-        gen_expr(gen, node->left);
+        printf("CALL $b_list_print\n");
+      } else if (node->third->data_type == DATA_UNION) {
+        gen_expr(gen, node->third);
+        printf("CALL $b_print_any\n");
+      } else {
+        gen_expr(gen, node->third);
         printf("POPS LF@tmp1\n");
-        printf("ARRAYGET LF@tmp2 LF@tmp1 int@%d\n", node->field_index);
-        printf("PUSHS LF@tmp2\n");
-        break;
-      }
-      if (node->is_ctor) {
-        gen_case_constructor(gen, node);
-        break;
-      }
-      if (node->is_static_call) {
-        size_t count = 0;
-        for (AST_NODE *arg = node->third; arg != NULL; arg = arg->next) {
-          gen_expr(gen, arg);
-          count++;
-        }
-        if (count == 2) {
-          printf("PUSHS int@1\n");
-        }
-        printf("PUSHS int@0\n");
-        printf("CALL $b_list_range\n");
-        break;
-      }
-      if (node->is_method && node->left != NULL && node->name != NULL &&
-          node->third != NULL && node->third->is_function_ref) {
-        if (strcmp(node->name, "filter") == 0) {
-          gen_list_predicate(gen, node, 0);
-          break;
-        }
-        if (strcmp(node->name, "takeWhile") == 0) {
-          gen_list_predicate(gen, node, 1);
-          break;
-        }
-        if (strcmp(node->name, "dropWhile") == 0) {
-          gen_list_predicate(gen, node, 2);
-          break;
-        }
-      }
-      /*===============
-       *PRINT
-       *===============
-       *
-       *only for constants*/
-      if (strcmp(node->name, "print")==0) {
-        if (node->third->type == NODE_LITERAL &&
-            node->third->data_type == DATA_UNIT) {
+        if (node->third->data_type == DATA_UNIT) {
           printf("WRITE string@()\n");
+        } else {
+          printf("WRITE LF@tmp1\n");
         }
-        else if (node->third->type == NODE_LITERAL) literal(gen,node->third, "WRITE");
-        //print(x)
-        else if (node->third->data_type == DATA_LIST) {
-          gen_expr(gen, node->third);
-          printf("CALL $b_list_print\n");
-        }
-        else if (node->third->data_type == DATA_UNION) {
-          gen_expr(gen, node->third);
-          printf("CALL $b_print_any\n");
-        }
-        else {
-          gen_expr(gen, node->third);
-          printf("POPS LF@tmp1\n");
-          if (node->third->data_type == DATA_UNIT) {
-            printf("WRITE string@()\n");
-          } else {
-            printf("WRITE LF@tmp1\n");
-          }
-        }
-        //only expresion which doesnt return value
-        printf("PUSHS nil@nil\n");
       }
-      else if (node->name != NULL && strcmp(node->name, "List") == 0 &&
+      // only expresion which doesnt return value
+      printf("PUSHS nil@nil\n");
+    } else if (node->name != NULL && strcmp(node->name, "List") == 0 &&
                !node->is_method && node->data_type == DATA_LIST) {
-        gen_list_constructor(gen, node);
-      }
-      else if (node->is_method && node->name != NULL &&
-               strcmp(node->name, "toList") == 0 &&
-               node->left != NULL &&
+      gen_list_constructor(gen, node);
+    } else if (node->is_method && node->name != NULL &&
+               strcmp(node->name, "toList") == 0 && node->left != NULL &&
                (node->left->type == NODE_RANGE ||
-                (node->left->type == NODE_BINOP && node->left->data_type == DATA_LIST))) {
-        gen_range_list(gen, node->left);
-      }
-      else {
+                (node->left->type == NODE_BINOP &&
+                 node->left->data_type == DATA_LIST))) {
+      gen_range_list(gen, node->left);
+    } else {
 
-        // receiver of an extension method goes first
-        if (node->is_method && node->left != NULL) {
-          gen_expr(gen, node->left);
+      // receiver of an extension method goes first
+      if (node->is_method && node->left != NULL) {
+        gen_expr(gen, node->left);
+      }
+
+      gen_call_args(gen, node);
+
+      if (node->is_method && node->left != NULL &&
+          node->left->data_type == DATA_LIST && node->name != NULL) {
+        if (strcmp(node->name, "head") == 0) {
+          printf("CALL $b_list_head\n");
+        } else if (strcmp(node->name, "tail") == 0) {
+          printf("CALL $b_list_tail\n");
+        } else if (strcmp(node->name, "drop") == 0) {
+          printf("CALL $b_list_drop\n");
+        } else if (strcmp(node->name, "take") == 0) {
+          printf("CALL $b_list_take\n");
+        } else if (strcmp(node->name, "slice") == 0) {
+          printf("CALL $b_list_slice\n");
+        } else if (strcmp(node->name, "length") == 0) {
+          printf("CALL $b_list_length\n");
+        } else if (strcmp(node->name, "toString") == 0) {
+          printf("CALL $b_list_toStr\n");
+        } else if (strcmp(node->name, "toList") == 0) {
+          printf("CALL $b_list_toList\n");
+        } else {
+          printf("CALL $f_%s\n", node->name);
         }
+      } else if (is_builtin(node->name)) {
+        emit_builtin_call(gen, node);
+      } else
+        printf("CALL $f_%s\n", node->name);
+    }
+    break;
 
-        gen_call_args(gen, node);
+  case NODE_IDENT:
+    push_to_val(node);
+    break;
 
-        if (node->is_method && node->left != NULL &&
-            node->left->data_type == DATA_LIST && node->name != NULL) {
-          if (strcmp(node->name, "head") == 0) {
-            printf("CALL $b_list_head\n");
-          } else if (strcmp(node->name, "tail") == 0) {
-            printf("CALL $b_list_tail\n");
-          } else if (strcmp(node->name, "drop") == 0) {
-            printf("CALL $b_list_drop\n");
-          } else if (strcmp(node->name, "take") == 0) {
-            printf("CALL $b_list_take\n");
-          } else if (strcmp(node->name, "slice") == 0) {
-            printf("CALL $b_list_slice\n");
-          } else if (strcmp(node->name, "length") == 0) {
-            printf("CALL $b_list_length\n");
-          } else if (strcmp(node->name, "toString") == 0) {
-            printf("CALL $b_list_toStr\n");
-          } else if (strcmp(node->name, "toList") == 0) {
-            printf("CALL $b_list_toList\n");
-          } else {
-            printf("CALL $f_%s\n", node->name);
-          }
-        }
-        else if (is_builtin(node->name)) {
-          emit_builtin_call(gen,node);
-        }
-        else printf("CALL $f_%s\n",node->name);
-      }
+  case NODE_LITERAL:
+    literal(node, "PUSHS");
+    break;
+
+  case NODE_UNOP:
+    switch (node->op_type) {
+    case OP_ADD:
+      gen_expr(gen, node->left);
       break;
-
-    case NODE_IDENT:
-      push_to_val(node);
+    case OP_SUB:
+      gen_expr(gen, node->left);
+      if (node->data_type == DATA_DOUBLE) {
+        printf("PUSHS float@%a\n", -1.0);
+      } else {
+        printf("PUSHS int@-1\n");
+      }
+      printf("MULS\n");
       break;
-
-    case NODE_LITERAL:
-      literal(gen, node, "PUSHS");
+    case OP_NOT:
+      gen_expr(gen, node->left);
+      printf("NOTS\n");
       break;
-
-
-    case NODE_UNOP:
-      switch (node->op_type) {
-        case OP_ADD:
-          gen_expr(gen, node->left);
-          break;
-        case OP_SUB:
-          gen_expr(gen, node->left);
-          if (node->data_type == DATA_DOUBLE) {
-            printf("PUSHS float@%a\n", -1.0);
-          } else {
-            printf("PUSHS int@-1\n");
-          }
-          printf("MULS\n");
-          break;
-        case OP_NOT:
-          gen_expr(gen, node->left);
-          printf("NOTS\n");
-          break;
-        default:
-          break;
-      }
+    default:
       break;
-    case NODE_BINOP:
-      if (node->op_type==OP_AND) {
-        int i = new_label(gen);
+    }
+    break;
+  case NODE_BINOP:
+    if (node->op_type == OP_AND) {
+      int i = new_label(gen);
 
-        gen_expr(gen, node->left);
-        printf("POPS LF@tmp1\n");
-        printf("JUMPIFEQ and$end$%d LF@tmp1 bool@false\n",i);
+      gen_expr(gen, node->left);
+      printf("POPS LF@tmp1\n");
+      printf("JUMPIFEQ and$end$%d LF@tmp1 bool@false\n", i);
 
-        gen_expr(gen, node->right);
-        printf("POPS LF@tmp1\n");
+      gen_expr(gen, node->right);
+      printf("POPS LF@tmp1\n");
 
-        printf("LABEL and$end$%d\n",i);
-        printf("PUSHS LF@tmp1\n");
-        break;
-      }
-      if (node->op_type==OP_OR) {
-        int or_i = new_label(gen);
-
-        gen_expr(gen, node->left);
-        printf("POPS LF@tmp1\n");
-        printf("JUMPIFEQ or$end$%d LF@tmp1 bool@true\n",or_i);
-
-        gen_expr(gen, node->right);
-        printf("POPS LF@tmp1\n");
-
-        printf("LABEL or$end$%d\n",or_i);
-        printf("PUSHS LF@tmp1\n");
-        break;
-      }
-
-      if (node->data_type == DATA_LIST &&
-          (node->op_type == OP_TO || node->op_type == OP_UNTIL ||
-           node->op_type == OP_BY)) {
-        gen_range_list(gen, node);
-        break;
-      }
-
-      /*
-       *checking if one is INT and other is FLOAT
-       */
-      if ((node->left->data_type==DATA_INT&&node->right->data_type==DATA_DOUBLE)){
-        gen_expr(gen, node->left);
-        printf("INT2FLOATS\n");
-        gen_expr(gen, node->right);
-      }
-      else if((node->left->data_type==DATA_DOUBLE && node->right->data_type==DATA_INT)) {
-        gen_expr(gen, node->left);
-        gen_expr(gen, node->right);
-        printf("INT2FLOATS\n");
-      }
-      else {
-        gen_expr(gen, node->left);
-        gen_expr(gen, node->right);
-      }
-
-      switch (node->op_type) {
-        case OP_ADD:
-          if (node->data_type == DATA_LIST) {
-            printf("CALL $b_list_concat\n");
-          }
-          else if (node->data_type==DATA_INT || node->data_type==DATA_DOUBLE) printf("ADDS\n");
-          else if (node->data_type==DATA_STRING) {
-            printf("POPS LF@tmp1\n");
-            printf("POPS LF@tmp2\n");
-            printf("CONCAT LF@tmp3 LF@tmp2 LF@tmp1\n");
-            printf("PUSHS LF@tmp3\n");
-          }
-          break;
-        case OP_GT:
-          printf("GTS\n");
-          break;
-        case OP_LT:
-          printf("LTS\n");
-          break;
-        case OP_EQ:
-          printf("EQS\n");
-          break;
-        case OP_LE:
-          printf("GTS\n");
-          printf("NOTS\n");
-          break;
-        case OP_GE:
-          printf("LTS\n");
-          printf("NOTS\n");
-          break;
-        case OP_DIV:
-          node->data_type==DATA_DOUBLE ? printf("DIVS\n"):printf("IDIVS\n");
-          break;
-        case OP_MUL:
-          printf("MULS\n");
-          break;
-        case OP_SUB:
-          printf("SUBS\n");
-          break;
-        case OP_NOT:
-          printf("NOTS\n");
-          break;
-        case OP_NEQ:
-          printf("EQS\n");
-          printf("NOTS\n");
-          break;
-
-        default:
-          break;
-      }
+      printf("LABEL and$end$%d\n", i);
+      printf("PUSHS LF@tmp1\n");
       break;
+    }
+    if (node->op_type == OP_OR) {
+      int or_i = new_label(gen);
 
-    case NODE_INTERP:
-      printf("PUSHS string@\n");
-      for (AST_NODE *part = node->left; part; part = part->next) {
-        gen_expr(gen, part);
-        switch (part->data_type) {
-          case DATA_INT:
-            printf("CALL $b_toStr_int\n");
-            break;
-          case DATA_DOUBLE:
-            printf("CALL $b_toStr_float\n");
-            break;
-          case DATA_BOOL:
-            printf("CALL $b_toStr_bool\n");
-            break;
-          case DATA_UNIT:
-            printf("POPS LF@tmp1\n");
-            printf("PUSHS string@()\n");
-            break;
-          case DATA_LIST:
-            printf("CALL $b_list_toStr\n");
-            break;
-          case DATA_UNION:
-            printf("CALL $b_toStr_any\n");
-            break;
-          default:
-            break;
-        }
+      gen_expr(gen, node->left);
+      printf("POPS LF@tmp1\n");
+      printf("JUMPIFEQ or$end$%d LF@tmp1 bool@true\n", or_i);
+
+      gen_expr(gen, node->right);
+      printf("POPS LF@tmp1\n");
+
+      printf("LABEL or$end$%d\n", or_i);
+      printf("PUSHS LF@tmp1\n");
+      break;
+    }
+
+    if (node->data_type == DATA_LIST &&
+        (node->op_type == OP_TO || node->op_type == OP_UNTIL ||
+         node->op_type == OP_BY)) {
+      gen_range_list(gen, node);
+      break;
+    }
+
+    /*
+     *checking if one is INT and other is FLOAT
+     */
+    if ((node->left->data_type == DATA_INT &&
+         node->right->data_type == DATA_DOUBLE)) {
+      gen_expr(gen, node->left);
+      printf("INT2FLOATS\n");
+      gen_expr(gen, node->right);
+    } else if ((node->left->data_type == DATA_DOUBLE &&
+                node->right->data_type == DATA_INT)) {
+      gen_expr(gen, node->left);
+      gen_expr(gen, node->right);
+      printf("INT2FLOATS\n");
+    } else {
+      gen_expr(gen, node->left);
+      gen_expr(gen, node->right);
+    }
+
+    switch (node->op_type) {
+    case OP_ADD:
+      if (node->data_type == DATA_LIST) {
+        printf("CALL $b_list_concat\n");
+      } else if (node->data_type == DATA_INT || node->data_type == DATA_DOUBLE)
+        printf("ADDS\n");
+      else if (node->data_type == DATA_STRING) {
         printf("POPS LF@tmp1\n");
         printf("POPS LF@tmp2\n");
         printf("CONCAT LF@tmp3 LF@tmp2 LF@tmp1\n");
         printf("PUSHS LF@tmp3\n");
       }
       break;
-
-    case NODE_MATCH:
-      gen_match(gen, node);
+    case OP_GT:
+      printf("GTS\n");
       break;
-
-    case NODE_RANGE:
-      gen_range_list(gen, node);
+    case OP_LT:
+      printf("LTS\n");
       break;
-
-    case NODE_IF: {
-      int i = new_label(gen);
-
-      //if
-      gen_expr(gen, node->left);
-      printf("PUSHS bool@false\n");
-      printf("JUMPIFEQS xIF$%d$ELSE\n", i);
-
-      gen_block_value(gen, node->right, node->data_type);
-      printf("JUMP xIF$%d$END\n", i);
-      printf("LABEL xIF$%d$ELSE\n", i);
-      gen_block_value(gen, node->third, node->data_type);
-      printf("LABEL xIF$%d$END\n", i);
+    case OP_EQ:
+      printf("EQS\n");
       break;
-    }
+    case OP_LE:
+      printf("GTS\n");
+      printf("NOTS\n");
+      break;
+    case OP_GE:
+      printf("LTS\n");
+      printf("NOTS\n");
+      break;
+    case OP_DIV:
+      node->data_type == DATA_DOUBLE ? printf("DIVS\n") : printf("IDIVS\n");
+      break;
+    case OP_MUL:
+      printf("MULS\n");
+      break;
+    case OP_SUB:
+      printf("SUBS\n");
+      break;
+    case OP_NOT:
+      printf("NOTS\n");
+      break;
+    case OP_NEQ:
+      printf("EQS\n");
+      printf("NOTS\n");
+      break;
 
     default:
       break;
+    }
+    break;
+
+  case NODE_INTERP:
+    printf("PUSHS string@\n");
+    for (AST_NODE *part = node->left; part; part = part->next) {
+      gen_expr(gen, part);
+      switch (part->data_type) {
+      case DATA_INT:
+        printf("CALL $b_toStr_int\n");
+        break;
+      case DATA_DOUBLE:
+        printf("CALL $b_toStr_float\n");
+        break;
+      case DATA_BOOL:
+        printf("CALL $b_toStr_bool\n");
+        break;
+      case DATA_UNIT:
+        printf("POPS LF@tmp1\n");
+        printf("PUSHS string@()\n");
+        break;
+      case DATA_LIST:
+        printf("CALL $b_list_toStr\n");
+        break;
+      case DATA_UNION:
+        printf("CALL $b_toStr_any\n");
+        break;
+      default:
+        break;
+      }
+      printf("POPS LF@tmp1\n");
+      printf("POPS LF@tmp2\n");
+      printf("CONCAT LF@tmp3 LF@tmp2 LF@tmp1\n");
+      printf("PUSHS LF@tmp3\n");
+    }
+    break;
+
+  case NODE_MATCH:
+    gen_match(gen, node);
+    break;
+
+  case NODE_RANGE:
+    gen_range_list(gen, node);
+    break;
+
+  case NODE_IF: {
+    int i = new_label(gen);
+
+    // if
+    gen_expr(gen, node->left);
+    printf("PUSHS bool@false\n");
+    printf("JUMPIFEQS xIF$%d$ELSE\n", i);
+
+    gen_block_value(gen, node->right, node->data_type);
+    printf("JUMP xIF$%d$END\n", i);
+    printf("LABEL xIF$%d$ELSE\n", i);
+    gen_block_value(gen, node->third, node->data_type);
+    printf("LABEL xIF$%d$END\n", i);
+    break;
+  }
+
+  default:
+    break;
   }
   if (node->int_to_double) {
     printf("INT2FLOATS\n");

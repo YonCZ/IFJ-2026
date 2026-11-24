@@ -15,22 +15,16 @@ typedef struct {
   int label_counter;
   char *function_name;
   DATA_TYPE return_type;
-}Gen;
-
-
-
+} Gen;
 
 /*
  *create from function name and label counter
  */
 int new_label(Gen *gen);
 
-
 void emit(Gen *gen, char *label);
 
-
-void emit_string_literal(Gen *gem, char *str);
-
+void emit_string_literal(char *str);
 
 void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result);
 

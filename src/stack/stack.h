@@ -6,29 +6,29 @@
 #ifndef STACK_H
 #define STACK_H
 
-#include <stdbool.h>
 #include "scanner/token.h"
+#include <stdbool.h>
 
 // Kind of one stack symbol.
 typedef enum {
-    STACK_TERMINAL,    // Input token.
-    STACK_NONTERMINAL, // Reduced expression, holds an AST node.
-    STACK_MARKER,      // '<' boundary before a reduction.
-    STACK_EMPTY        // Value returned from an empty stack.
+  STACK_TERMINAL,    // Input token.
+  STACK_NONTERMINAL, // Reduced expression, holds an AST node.
+  STACK_MARKER,      // '<' boundary before a reduction.
+  STACK_EMPTY        // Value returned from an empty stack.
 } StackKind;
 
 // One symbol on the stack.
 typedef struct {
-    StackKind kind;   // What the symbol is.
-    Tokens     token; // Token type if terminal.
-    void      *node;  // AST node if nonterminal.
+  StackKind kind; // What the symbol is.
+  Tokens token;   // Token type if terminal.
+  void *node;     // AST node if nonterminal.
 } StackSymbol;
 
 // Dynamic stack.
 typedef struct {
-    StackSymbol *data;     // Array of symbols.
-    int          top;      // Top index, -1 is empty.
-    unsigned     capacity; // Allocated size.
+  StackSymbol *data; // Array of symbols.
+  int top;           // Top index, -1 is empty.
+  unsigned capacity; // Allocated size.
 } Stack;
 
 // Creates a new empty stack.
@@ -43,10 +43,12 @@ StackSymbol stack_pop(Stack *s);
 // Returns the top symbol without removing it, STACK_EMPTY symbol if empty.
 StackSymbol stack_top(const Stack *s);
 
-// Finds the topmost terminal, skips nonterminals and markers. STACK_EMPTY symbol if none.
+// Finds the topmost terminal, skips nonterminals and markers. STACK_EMPTY
+// symbol if none.
 StackSymbol stack_top_terminal(const Stack *s);
 
-// Inserts the '<' marker right above the topmost terminal. Does nothing if there is no terminal.
+// Inserts the '<' marker right above the topmost terminal. Does nothing if
+// there is no terminal.
 void stack_insert_marker(Stack *s);
 
 // Returns true if the stack is empty.
