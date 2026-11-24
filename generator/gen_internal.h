@@ -26,9 +26,9 @@ typedef struct {
 int new_label(Gen *gen);
 
 
-void emit_string_literal(Gen *gem, char *str);
+void emit_string_literal( char *str);
 
-void lower_members(AST_NODE *root);
+void refactoring(AST_NODE *root);
 
 void push_to_val(AST_NODE *node);
 void pop_to_val(AST_NODE *node);
@@ -38,5 +38,5 @@ void pop_to_val(AST_NODE *node);
  *=============
  */
 bool is_builtin(const char *name);
-void emit_builtin_call(Gen *gen, AST_NODE *call);
+void builtin_call(Gen *gen, AST_NODE *call);
 void emit_builtins(Gen *gen, AST_NODE *root);

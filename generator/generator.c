@@ -17,11 +17,6 @@
 #include "error.h"
 #include "gen_internal.h"
 
-/*==========================================================
- *       nova verze - snad spravna
- *===========================================================
- */
-
 
 char *emit_data_type (AST_NODE *node) {
   switch (node->data_type) {
@@ -33,17 +28,20 @@ char *emit_data_type (AST_NODE *node) {
       return  "String";
     case DATA_BOOL:
       return "Bool";
+    default:
+      return 0;
   }
 }
 
 
-void lower_members(AST_NODE *root) {
+void refactoring(AST_NODE *root) {
   for (AST_NODE *fn = root; fn; fn = fn->next) {
-    if (fn->left)lower_members(fn->left);
-    if (fn->right)lower_members(fn->right);
-    if (fn->third)lower_members(fn->third);
+    if (fn->left)refactoring(fn->left);
+    if (fn->right)refactoring(fn->right);
+    if (fn->third)refactoring(fn->third);
 
     //valmem
+    //from x.toStr => tostr(x)
     if (fn->type == NODE_CALL && fn->is_method == true && fn->has_parens ==false && fn->left) {
       if (strcmp(fn->name, "toString") == 0) {
         free(fn->name);
@@ -78,6 +76,7 @@ void lower_members(AST_NODE *root) {
     }
 
     //Paramlist
+    //add(a)(b)(c) -> add(a, b, c)
     if ((fn->type == NODE_FUNC_DEF || fn->type ==NODE_CALL) && fn->third && fn->third->type == NODE_PARAM_LIST) {
       AST_NODE *head = NULL;
       AST_NODE *tail = NULL;
@@ -105,7 +104,6 @@ void lower_members(AST_NODE *root) {
       char *new_type = malloc(len);
 
       if (new_type == NULL) {
-        free(type);
         error_exit(ERROR_INTERNAL,fn->line,0);
       }
 
@@ -150,7 +148,7 @@ int new_label(Gen *gen) {
 }
 
 //writes definition of variables in function right after pushFrame
-void print_defvar(AST_NODE *node, Gen *gen) {
+void print_defvar(AST_NODE *node) {
   if (node->type==NODE_VAR_DEF) {
     printf("DEFVAR LF@%s$%d\n", node->name,node->id);
   }
@@ -163,27 +161,25 @@ void print_defvar(AST_NODE *node, Gen *gen) {
 void emit_defvars(Gen *gen, AST_NODE *node) {
   if (!node)return;
   if (node->left != NULL) {
-    print_defvar(node->left,gen);
+    print_defvar(node->left);
     emit_defvars(gen,node->left);
   }
   if (node->right != NULL) {
-    print_defvar(node->right, gen);
+    print_defvar(node->right);
     emit_defvars(gen,node->right);
   }
   if (node->third != NULL) {
-    print_defvar(node->third, gen);
+    print_defvar(node->third);
     emit_defvars(gen,node->third);
   }
   if (node->next!=NULL) {
-    print_defvar(node->next, gen);
+    print_defvar(node->next);
     emit_defvars(gen,node->next);
   }
 }
 
-/*
- *special characters
- */
-void emit_string_literal(Gen *gen, char *str) {
+//special characters
+void emit_string_literal(char *str) {
   printf("string@");
   for (char *c = str; *c; c++) {
     switch (*c) {
@@ -215,7 +211,6 @@ static void process_params(AST_NODE *node) {
     process_params(node->next);
     printf("POPS LF@%s$%d\n", node->name, node->id);
   }
-
 }
 
 void gen_function(Gen *gen, AST_NODE *fn) {
@@ -235,11 +230,13 @@ void gen_function(Gen *gen, AST_NODE *fn) {
 
 
   //processing block of code
-
+  //controlling return values
   for (AST_NODE *node = fn->left; node != NULL; node = node->next) {
+    //function has to return something, in the end is stmt
     if (node->next==NULL && fn->data_type != DATA_UNIT && node->type == NODE_EXPR_STMT) {
       gen_expr(gen, node->left);
     }
+    //if has to return something
     else if (node->next == NULL && fn->data_type != DATA_UNIT && node->type == NODE_IF) {
       gen_expr(gen,node);
     }
@@ -257,9 +254,6 @@ void gen_function(Gen *gen, AST_NODE *fn) {
 
 
 void generator_init(Gen *gen, AST_NODE *root) {
-  //==================
-  //ast_print(root);
-  //====================*/
   printf(".IFJcode26\n");
 
   //finding main function

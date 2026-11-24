@@ -306,18 +306,11 @@ AST_NODE *ast_case_create(AST_NODE *pattern, AST_NODE *guard, AST_NODE *body, AS
 AST_NODE *ast_wildcard_create(AST_NODE *next);
 
 AST_NODE *ast_append(AST_NODE *new_node, AST_NODE *next);
-/*   new_node ---next3---> next2 ---next1---> ...
-*/
+//   new_node ---next3---> next2 ---next1---> ...
 
 
 
 
 
 void free_AST(AST_NODE *node);
-
-/* ladici vypis AST jako strom na stderr (ast.c) */
-void ast_print(const AST_NODE *root);
-
-/* vypise jen jeden uzel na jeden radek (ast.c) */
-void ast_print_node(const AST_NODE *node);
 

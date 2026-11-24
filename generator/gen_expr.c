@@ -7,7 +7,6 @@
  * Date: September 2026
  */
 
-#include <iso646.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,11 +16,11 @@
 #include "../scanner/error.h"
 
 
-void literal(Gen *gen, AST_NODE *node, char* func_name) {
+void literal( AST_NODE *node, char* func_name) {
   printf("%s ", func_name);
   switch (node->data_type) {
     case DATA_STRING:
-      emit_string_literal(gen, node->sval);
+      emit_string_literal( node->sval);
       break;
     case DATA_INT:
       printf("int@%lld", node->ival);
@@ -58,7 +57,7 @@ void gen_expr(Gen *gen, AST_NODE *node) {
        *
        *only for constants*/
       if (strcmp(node->name, "print")==0) {
-        if (node->third->type == NODE_LITERAL) literal(gen,node->third, "WRITE");
+        if (node->third->type == NODE_LITERAL) literal(node->third, "WRITE");
         //print(x)
         else {
           gen_expr(gen, node->third);
@@ -77,7 +76,7 @@ void gen_expr(Gen *gen, AST_NODE *node) {
 
         //builtins
         if (is_builtin(node->name)) {
-          emit_builtin_call(gen,node);
+            builtin_call(gen,node);
         }
         else printf("CALL $f_%s\n",node->name);
       }
@@ -88,7 +87,7 @@ void gen_expr(Gen *gen, AST_NODE *node) {
       break;
 
     case NODE_LITERAL:
-      literal(gen, node, "PUSHS");
+      literal(node, "PUSHS");
       break;
 
 
