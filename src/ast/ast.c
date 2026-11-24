@@ -233,9 +233,9 @@ AST_NODE *ast_ident_create(AST_NODE *left, char *name, AST_NODE *next) {
 }
 
 // creates a variable definition node
-AST_NODE *ast_var_def_create(
-    AST_NODE *term, AST_NODE *next, char *name, bool is_const,
-    DATA_TYPE declared) { // semantic analyze must check if DATA_NONE
+// semantic analysis must check if DATA_NONE
+AST_NODE *ast_var_def_create(AST_NODE *term, AST_NODE *next, char *name,
+                             bool is_const, DATA_TYPE declared) {
   AST_NODE *node = ast_create(term, NULL, next, NODE_VAR_DEF);
   ast_name(node, name);
   node->is_const = is_const;

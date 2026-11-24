@@ -25,18 +25,20 @@ typedef struct {
 
 typedef struct {
   symtable_item_t *items;
-  size_t size; // current size of the table (number of slots empty, occupied, or
-               // deleted)
-  size_t count; // number of items in the table (occupied slots)
+  // current size of the table (number of slots empty, occupied, or deleted)
+  size_t size;
+  // number of items in the table (occupied slots)
+  size_t count;
 } symtable_t;
 
-bool symtableInit(
-    symtable_t *table); // starting function, allocates memory for the symbol
-                        // table and initializes its fields
-void symtableFree(
-    symtable_t *table); // ending function, frees the memory allocated for the
-                        // symbol table and its items
-bool symtableExists(symtable_t *table); // checks if the symtable even exists
+// starting function, allocates memory for the symbol table and initializes its
+// fields
+bool symtableInit(symtable_t *table);
+// ending function, frees the memory allocated for the symbol table and its
+// items
+void symtableFree(symtable_t *table);
+// checks if the symtable even exists
+bool symtableExists(symtable_t *table);
 
 // functions for inserting and searching items in the symbol table
 bool symtableInsert(symtable_t *table, const char *key, void *value);

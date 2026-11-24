@@ -957,8 +957,8 @@ static void analyze_assign(AST_NODE *assign_node, semantic_context_t *context) {
              : analyze_expression(assign_node->right, context));
   context->expected_type = prev_expected;
 
-  if (!coerce_value_expr(assign_node->right, var_item->type_ref,
-                         context)) { // 6
+  // type mismatch (error 6)
+  if (!coerce_value_expr(assign_node->right, var_item->type_ref, context)) {
     error_exit(ERROR_SEM_TYPE, assign_node->line, assign_node->left->name,
                "Type mismatch in assignment.");
     return;

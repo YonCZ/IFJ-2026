@@ -54,9 +54,9 @@ typedef struct scope_node {
 
 /* semantic analysis context */
 typedef struct {
-  symtable_t global_symtable;  // global function table
-  scope_node_t *current_scope; // top of the local block stack (instead of a
-                               // single symtable*)
+  symtable_t global_symtable; // global function table
+  // top of the local block stack (instead of a single symtable*)
+  scope_node_t *current_scope;
   symbol_info_t *current_func; // currently analyzed function
   bool in_function;
   bool in_loop;

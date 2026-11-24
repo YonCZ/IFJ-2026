@@ -56,9 +56,8 @@ void symtableFree(symtable_t *table) {
   // not empty
   for (size_t i = 0; i < table->size; i++) {
     if (table->items[i].status == SLOT_OCCUPIED) {
-      free(table->items[i]
-               .key); // only empties the table, does not get rid of the value
-                      // completely, because it is only a pointer
+      // only the key is freed; the value is owned by the caller
+      free(table->items[i].key);
     }
   }
   free(table->items);
@@ -130,11 +129,11 @@ bool symtableInsert(symtable_t *table, const char *key, void *value) {
   // key does not exist, so we can insert it
   size_t index = symtableHash(key, table->size);
   while (table->items[index].status == SLOT_OCCUPIED) {
-    index = (index + 1) %
-            table->size; // goes through the table until it finds an empty slot
+    // goes through the table until it finds an empty slot
+    index = (index + 1) % table->size;
   }
-  table->items[index].key =
-      (char *)malloc(strlen(key) + 1); // allocates memory for the key + '\0'
+  // allocates memory for the key and the terminating '\0'
+  table->items[index].key = (char *)malloc(strlen(key) + 1);
   if (table->items[index].key == NULL) {
     error_exit(ERROR_INTERNAL, 0,
                "Memory allocation failed for symbol table key.",
