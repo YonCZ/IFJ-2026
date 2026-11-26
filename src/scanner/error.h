@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: error.h
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  */
 
 #ifndef ERROR_H
