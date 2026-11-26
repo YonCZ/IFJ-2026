@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project IFJ2026
+IFJ26 Compiler 
+Author: Lucie Alexandrova [xalexal00]
+File: precedence.c
 
 Grammar rules:
 * E -> i (i is identifier or literal)
