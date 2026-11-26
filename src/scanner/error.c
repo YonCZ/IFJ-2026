@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: error.c
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  */
 
 #include <stdarg.h>
