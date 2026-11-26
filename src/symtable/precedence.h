@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project: IFJ2026
+IFJ26 Compiler 
+Author: Lucie Alexandrova [xalexal00]
+File: precedence.h
 */
 #ifndef PRECEDENCE_TABLE_H
 #define PRECEDENCE_TABLE_H
