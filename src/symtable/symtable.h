@@ -1,6 +1,6 @@
 /**
 IFJ26 Compiler 
-Author: Lucie Alexandrova [xalexal00]
+Author: Lucie Alexandrová [xalexal00]
 File: precedence.c
 
 This file contains symtable function and structural definitions and declarations
