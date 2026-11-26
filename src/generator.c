@@ -16,10 +16,6 @@
 #include "ast.h"
 #include "gen_internal.h"
 
-/*==========================================================
- *       nova verze - snad spravna
- *===========================================================
- */
 
 // valmem
 void lower_members(AST_NODE *root) {
@@ -98,6 +94,7 @@ void print_defvar(AST_NODE *node) {
     printf("DEFVAR LF@for_idx$%d\n", node->id);
   }
 }
+
 // walks the function body and prints DEFVAR for all variables
 void emit_defvars(AST_NODE *node) {
   if (!node)
@@ -210,10 +207,6 @@ void gen_function(Gen *gen, AST_NODE *fn) {
   }
   emit_defvars(fn->left);
 
-  // parametry - muze jich byt nekonecno? rekurzivni funkce vyrvarejici LF@tmp
-  //=============================
-
-  // mezi promenne cz
   printf("DEFVAR LF@tmp1\n");
   printf("DEFVAR LF@tmp2\n");
   printf("DEFVAR LF@tmp3\n");

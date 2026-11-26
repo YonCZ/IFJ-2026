@@ -12,11 +12,6 @@
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
-// TODO prelozit
-/* volajici vyhodnoti zleva do prava
- *
- *main function
- */
 void generator_init(Gen *gen, AST_NODE *root);
 
 void gen_function(Gen *gen, AST_NODE *fn);

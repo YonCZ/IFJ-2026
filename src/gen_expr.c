@@ -16,9 +16,6 @@
 #include "gen_internal.h"
 #include "generator.h"
 #include "error.h"
-//===========================
-// puts one value on stack
-//===========================
 
 void literal(AST_NODE *node, char *func_name) {
   printf("%s ", func_name);
