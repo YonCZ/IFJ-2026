@@ -1,10 +1,7 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler 
  * File: generator.c
- * Module: Generator
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
+ * Author: Pavel Novák [xnovakp01]
  */
 
 #include "ast.h"
@@ -12,8 +9,7 @@
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
-// TODO prelozit
-/* volajici vyhodnoti zleva do prava
+/* The caller evaluates from left to right.
  *
  *main function
  */
