@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: token.h
- * Autor: Polina Tihaninova [xtishap00]
+ * IFJ26 Compiler
+ * File: token.h
+ * Author: Polina Tihaninova [xtishap00]
  *
  * Prompt: Pomoz mi sjednotit nazvy tokenu a strukturu Token
  * s aktualnim scannerem a parserem. Zachovej moje komentare
