@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
- * Soubor: stack.c
- * Autor: Tadeáš Přikryl [xprikrt00]
+ * File: stack.c
+ * Author: Tadeáš Přikryl [xprikrt00]
  *
  * Prompt: "Precti si AGENTS.md, a na zaklade specifikace a zadani souboru,
  * udelej review meho kodu jestli splnuje vse co zadani pozaduje a jestli
