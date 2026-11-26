@@ -7,33 +7,34 @@
 #ifndef ERROR_H
 #define ERROR_H
 
-// vypsani vsech chyb
+// list of all errors
 typedef enum {
-  // lexikalni chyba
+  // lexical error
   ERROR_LEX = 1,
-  // syntakticka chyba
+  // syntax error
   ERROR_SYN = 2,
-  // semanticka chyba -> pouziti nedefinovane funkce, promenne nebo typu
+  // semantic error -> use of an undefined function, variable or type
   ERROR_SEM_UNDEF = 3,
-  // semanticka chyba -> nepovolena redefinice funkce, promenne, typu
+  // semantic error -> not allowed redefinition of a function, variable, type
   ERROR_SEM_REDEF = 4,
-  // semanticka chyba -> nespravny pocet nebo typ argumentu pri volani funkce
+  // semantic error -> wrong number or type of arguments in a function call
   ERROR_SEM_ARG = 5,
-  // semanticka chyba -> typova nekompatibilita nebo odvozeni typu ve vyrazu
+  // semantic error -> type incompatibility or type inference in an expression
   ERROR_SEM_TYPE = 6,
-  // semanticka chyba -> pokus o zapis do nemodifikovane promenne nebo parametru
+  // semantic error -> trying to write to a variable or parameter that cannot
+  // be changed
   ERROR_SEM_READ = 7,
-  // ostatni semanticke chyby (nepovoleny return, nevycerpavajici match)
+  // other semantic errors (not allowed return, non-exhaustive match)
   ERROR_SEM_OTHER = 10,
-  // interni chyba
+  // internal error
   ERROR_INTERNAL = 99
 } Error_state;
 
 typedef void (*cleanup)(void);
-// volani uklizeni =
+// call for cleanup =
 void error_cleanup(cleanup st);
 
-// volani vypisu chyb
+// call for printing errors
 void error_exit(Error_state code, int line, const char *name, ...);
 
 #endif
