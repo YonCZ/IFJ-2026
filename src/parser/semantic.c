@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project IFJ2026
+IFJ26 Compiler 
+Author: Lucie Alexandrová [xalexal00]
+File: precedence.c
 
 This file contains semantic analysis functions.
 This file was developed with the help of the Gemini Hydrogen AI model.
