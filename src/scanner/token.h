@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: token.h
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  *
  * Prompt: Pomoz mi sjednotit nazvy tokenu a strukturu Token
  * s aktualnim scannerem a parserem. Zachovej moje komentare
