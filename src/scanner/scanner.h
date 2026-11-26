@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: scanner.h
- * Autor: Polina Tihaninova [xtishap00]
+ * IFJ26 Compiler
+ * File: scanner.h
+ * Author: Polina Tihaninova [xtishap00]
  */
 
 #ifndef SCANNER_H
