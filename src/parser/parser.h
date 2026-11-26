@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: parser.h
- * Autor: Tadeas Prikryl [xprikrt00]
+ * IFJ26 Compiler
+ * File: parser.h
+ * Author: Tadeáš Přikryl [xprikrt00]
  */
 
 #ifndef PARSER_H
