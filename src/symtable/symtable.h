@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project IFJ2026
+IFJ26 Compiler 
+Author: Lucie Alexandrova [xalexal00]
+File: precedence.c
 
 This file contains symtable function and structural definitions and declarations
 based on a hash table. The hashing algorithm used is the djb2 algorithm.
