@@ -21,25 +21,25 @@ static int cleanup_count = 0;
 static const char *error_string(Error_state code) {
   switch (code) {
   case ERROR_LEX:
-    return "Lexikalni chyba (chyba 1)";
+    return "Lexical error (error 1)";
   case ERROR_SYN:
-    return "Syntakticka chyba (chyba 2)";
+    return "Syntax error (error 2)";
   case ERROR_SEM_UNDEF:
-    return "Semanticka chyba - nedefinovany symbol (chyba 3)";
+    return "Semantic error - undefined symbol (error 3)";
   case ERROR_SEM_REDEF:
-    return "Semanticka chyba - redefinice symbolu (chyba 4)";
+    return "Semantic error - symbol redefinition (error 4)";
   case ERROR_SEM_ARG:
-    return "Semanticka chyba - spatne argumenty (chyba 5)";
+    return "Semantic error - wrong arguments (error 5)";
   case ERROR_SEM_TYPE:
-    return "Semanticka chyba - typova nekompatibilita (chyba 6)";
+    return "Semantic error - type incompatibility (error 6)";
   case ERROR_SEM_READ:
-    return "Semanticka chyba - spatny zapis do parametru (chyba 7)";
+    return "Semantic error - wrong write to a parameter (error 7)";
   case ERROR_SEM_OTHER:
-    return "Semanticka chyba - dlasi chyby (chyba 10)";
+    return "Semantic error - other errors (error 10)";
   case ERROR_INTERNAL:
-    return "Interni chyba (chyba 99)";
+    return "Internal error (error 99)";
   default:
-    return "Neznama chyba";
+    return "Unknown error";
   }
 }
 
@@ -54,7 +54,7 @@ void error_cleanup(cleanup st) {
 void error_exit(Error_state code, int line, const char *name, ...) {
   fprintf(stderr, "%s", error_string(code));
   if (line > 0) {
-    fprintf(stderr, ", radek %d", line);
+    fprintf(stderr, ", line %d", line);
   }
   fprintf(stderr, ": ");
 
