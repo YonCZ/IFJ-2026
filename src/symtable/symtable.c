@@ -1,7 +1,7 @@
 /**
-Author: Lucie Alexandrova
-Login: xalexal00
-Part of project IFJ2026
+IFJ26 Compiler 
+Author: Lucie Alexandrová [xalexal00]
+File: symtable.c
 */
 
 #include "symtable.h"
