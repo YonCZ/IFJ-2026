@@ -9,9 +9,9 @@
 #include "token.h"
 #include <stdio.h>
 
-// zavola se funkce na scanner
+// calls the scanner function to get the next token
 Token get_token(FILE *f);
-// uvolneni
+// frees the memory used by the scanner
 void scanner_free();
 
 #endif
