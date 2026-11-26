@@ -1,6 +1,6 @@
 /*
  * IFJ26 Compiler 
- * File: generator.c
+ * File: generator.h
  * Author: Pavel Novák [xnovakp01]
  */
 
