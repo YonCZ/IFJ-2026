@@ -1,10 +1,7 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler 
  * File: generator.c
- * Module: Generator
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
+ * Author: Pavel Novák [xnovakp01]
  */
 
 #include "generator.h"
@@ -16,10 +13,6 @@
 #include "ast.h"
 #include "gen_internal.h"
 
-/*==========================================================
- *       nova verze - snad spravna
- *===========================================================
- */
 
 // valmem
 void lower_members(AST_NODE *root) {
