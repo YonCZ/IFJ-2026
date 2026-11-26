@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: scanner.h
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  */
 
 #ifndef SCANNER_H
