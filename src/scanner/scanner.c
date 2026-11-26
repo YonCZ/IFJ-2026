@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: scanner.c
- * Autor: Polina Tihaninova [xtishap00]
+ * IFJ26 Compiler
+ * File: scanner.c
+ * Author: Polina Tihaninova [xtishap00]
  */
 
 #define _POSIX_C_SOURCE 200809L
