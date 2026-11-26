@@ -1,10 +1,7 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler
  * File: gen_expr.c
- * Module: Generator
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
+ * Author: Pavel Novák [xnovakp01]
  */
 
 #include <iso646.h>
@@ -15,10 +12,7 @@
 #include "ast.h"
 #include "gen_internal.h"
 #include "generator.h"
-#include "scanner/error.h"
-//===========================
-// puts one value on stack
-//===========================
+#include "error.h"
 
 void literal(AST_NODE *node, char *func_name) {
   printf("%s ", func_name);
