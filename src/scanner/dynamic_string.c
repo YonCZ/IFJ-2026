@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: dynamic_string.c
- * Autor: Polina Tihaninova [xtishap00]
+ * IFJ26 Compiler
+ * File: dynamic_string.c
+ * Author: Polina Tihaninova [xtishap00]
  */
 
 #include "dynamic_string.h"
