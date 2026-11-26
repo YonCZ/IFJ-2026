@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: error.c
- * Autor: Polina Tihaninova [xtishap00]
+ * IFJ26 Compiler
+ * File: error.c
+ * Author: Polina Tihaninova [xtishap00]
  */
 
 #include <stdarg.h>
