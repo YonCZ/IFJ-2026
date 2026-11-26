@@ -1,6 +1,7 @@
 /*
- * Author: Tadeas Prikryl (xprikrt00)
- * IFJ26 Compiler - Stack for precedence analysis
+ * IFJ26 Compiler
+ * File: stack.h
+ * Author: Tadeáš Přikryl [xprikrt00]
  */
 
 #ifndef STACK_H
