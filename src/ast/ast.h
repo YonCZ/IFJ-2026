@@ -1,14 +1,10 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler
  * File: ast.h
- * Module: Generator
  * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
  */
 
-// comments made by Claude Sonnet 5.5 high
-// input; Mám funkce v ast a chci abys mi udělal komentáře takové že budou
+// input: Mám funkce v ast a chci abys mi udělal komentáře takové že budou
 // vypadat jako stromy, left right, third_node, next a budou popisovat co se tam
 // deje, samozrejme to bude pojmenovane podle parametru. Na ostatni parametry
 // nez node se nedivej
