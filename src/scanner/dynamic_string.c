@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: dynamic_string.c
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  */
 
 #include "dynamic_string.h"
@@ -9,69 +9,69 @@
 #include <stdlib.h>
 #include <string.h>
 
-// funkce ktera inicializuje funkce stringu, da kapacitu 32 a delku 0, vyhradi
-// pamet pres malloc, kdyz ne tak interni chyba 99
+// function that initializes the string, sets capacity to 32 and length to 0,
+// allocates memory with malloc, and if it fails, it is internal error 99
 void ds_init(DString *s) {
-  // kapacita 32
+  // capacity 32
   s->cap = 32;
-  // delka 0
+  // length 0
   s->len = 0;
   s->data = malloc(s->cap);
   if (!s->data) {
-    error_exit(ERROR_INTERNAL, 0, "Alokace selhala");
+    error_exit(ERROR_INTERNAL, 0, "Allocation failed");
   }
   s->data[0] = '\0';
 }
 
-// funkce ktera uvolnuje data
+// function that frees the data
 void ds_free(DString *s) {
-  // pokud tam jsou data tak je muzeme uvolnit
+  // if there is data, we can free it
   if (s->data) {
     free(s->data);
-    // vynulovani pointeru
+    // set the pointer to NULL
     s->data = NULL;
   }
-  // jinak delka a kapacita se nastavi jako nula
+  // length and capacity are set to zero
   s->len = 0;
   s->cap = 0;
 }
 
-// funkce ktera jenom vycisti string, ale pamet se ponecha
+// function that only clears the string, but keeps the memory
 void ds_clear(DString *s) {
   s->len = 0;
   if (s->data) {
-    // strci naprvni misto ukoncovaci znak
+    // put the terminating character at the first place
     s->data[0] = '\0';
   }
 }
 
-// funkce ktera pushuje char nakonec
+// function that adds a char to the end
 void ds_push_char(DString *s, char c) {
-  // kdyz uz se to tam nevede, musime zvetsit kapacitu
+  // if there is not enough space, we must make the capacity bigger
   if (s->len + 1 >= s->cap) {
     s->cap *= 2;
-    // zvetseni pameti
+    // make the memory bigger
     char *new_data = realloc(s->data, s->cap);
-    // kontrola reallocu, jinak interni chyba
+    // check realloc, otherwise internal error
     if (!new_data) {
-      error_exit(ERROR_INTERNAL, 0, "Realokace selhala");
+      error_exit(ERROR_INTERNAL, 0, "Reallocation failed");
     }
     s->data = new_data;
   }
-  // prida se znak a zvets se delka a soupne posunuty ukoncovaci znak
+  // add the character, increase the length and move the terminating character
   s->data[s->len++] = c;
   s->data[s->len] = '\0';
 }
 
-// funkce ktera vyrobi novou kopii stringu
+// function that makes a new copy of the string
 char *ds_dup(const DString *s) {
-  // alokujeme nove misto
+  // allocate new space
   char *dup = malloc(s->len + 1);
-  // kontrola mallocu, jinak interni chyba 99
+  // check malloc, otherwise internal error 99
   if (!dup) {
-    error_exit(ERROR_INTERNAL, 0, "Dup selhal - chyba alokace");
+    error_exit(ERROR_INTERNAL, 0, "Dup failed - allocation error");
   }
-  // kopiruje se pamet do noveho mista
+  // copy the memory to the new place
   memcpy(dup, s->data, s->len + 1);
   return dup;
 }
