@@ -15,66 +15,66 @@
 #include <stdbool.h>
 
 typedef enum {
-  // operator
+  // operators
   PLUS_TOKEN,     // plus +
   MINUS_TOKEN,    // minus -
-  MUL_TOKEN,      // nasobeni *
-  DIV_TOKEN,      // deleni /
-  ASSIGN_TOKEN,   // prirazeni =
-  EQ_TOKEN,       // rovno ==
-  NEQ_TOKEN,      // nerovno !=
-  LESS_EQ_TOKEN,  // mensi nebo rovno <=
-  GREAT_EQ_TOKEN, // vetsi nebo rovno >=
-  LESS_TOKEN,     // mensi <
-  GREAT_TOKEN,    // vetsi >
+  MUL_TOKEN,      // multiplication *
+  DIV_TOKEN,      // division /
+  ASSIGN_TOKEN,   // assignment =
+  EQ_TOKEN,       // equal ==
+  NEQ_TOKEN,      // not equal !=
+  LESS_EQ_TOKEN,  // less or equal <=
+  GREAT_EQ_TOKEN, // greater or equal >=
+  LESS_TOKEN,     // less <
+  GREAT_TOKEN,    // greater >
 
-  // oddelovace a symboly obecne
-  RPAR_TOKEN,      // kulata zavorka ) zprava
-  LPAR_TOKEN,      // kulata zavorka ( zleva
-  DOT_TOKEN,       // tecka .
-  COMMA_TOKEN,     // carka ,
-  AT_TOKEN,        // zavinac @
-  COLON_TOKEN,     // dvojtecka :
-  SEMICOLON_TOKEN, // strednik ;
+  // separators and general symbols
+  RPAR_TOKEN,      // round bracket ) on the right
+  LPAR_TOKEN,      // round bracket ( on the left
+  DOT_TOKEN,       // dot .
+  COMMA_TOKEN,     // comma ,
+  AT_TOKEN,        // at sign @
+  COLON_TOKEN,     // colon :
+  SEMICOLON_TOKEN, // semicolon ;
 
-  // slova
+  // keywords
   DEF_TOKEN,    // def
-  IF_TOKEN,     // podminka if
-  WHILE_TOKEN,  // podminka while
-  DO_TOKEN,     // podmink do while
-  ELSE_TOKEN,   // podminka if else
-  THEN_TOKEN,   // podminka if then
-  RETURN_TOKEN, // vraceni return
+  IF_TOKEN,     // condition if
+  WHILE_TOKEN,  // loop while
+  DO_TOKEN,     // do while loop
+  ELSE_TOKEN,   // else part of if
+  THEN_TOKEN,   // then part of if
+  RETURN_TOKEN, // return
   IMPORT_TOKEN, // import
-  VAR_TOKEN,    // modifikovatelna promenna
-  VAL_TOKEN,    // nemodifikovatelna promenna
+  VAR_TOKEN,    // variable that can be changed
+  VAL_TOKEN,    // variable that cannot be changed
 
-  // typy
+  // types
   INT_TOKEN,     // int
   STRING_TOKEN,  // string
   DOUBLE_TOKEN,  // double
-  UNIT_TOKEN,    // skutecna hodnota
+  UNIT_TOKEN,    // unit (the type with no real value)
   BOOLEAN_TOKEN, // boolean
 
-  // identifikatory a literaly
-  INT_NUM_TOKEN,     // skutecne cislo (5)
-  DOUBLE_NUM_TOKEN,  // skutecne double cislo (3.5)
-  STRING_WORD_TOKEN, // skutecne slovo (pes)
-  UNIT_LIT_TOKEN,    // hodnota ()
-  IDENTIFIER_TOKEN,  // nazev promenne
+  // identifiers and literals
+  INT_NUM_TOKEN,     // real integer number (5)
+  DOUBLE_NUM_TOKEN,  // real double number (3.5)
+  STRING_WORD_TOKEN, // real text (dog)
+  UNIT_LIT_TOKEN,    // value ()
+  IDENTIFIER_TOKEN,  // name of a variable
 
-  // komentare
-  SLASH_COMM_TOKEN,     // komentar
-  SLASH_COMM_END_TOKEN, // konec komentare
+  // comments
+  SLASH_COMM_TOKEN,     // comment
+  SLASH_COMM_END_TOKEN, // end of a comment
 
-  // struktura
-  INDENT_TOKEN, // vyssi uroven odsazeni
-  DEDENT_TOKEN, // nizsi uroven odsazeni
-  EOF_TOKEN,    // konec souboru
-  EOL_TOKEN,    // konec radku
+  // structure
+  INDENT_TOKEN, // higher indentation level
+  DEDENT_TOKEN, // lower indentation level
+  EOF_TOKEN,    // end of file
+  EOL_TOKEN,    // end of line
 
-  // ROZSIRENI
-  FOR_TOKEN,       // for cyklus
+  // EXTENSIONS
+  FOR_TOKEN,       // for loop
   AND_TOKEN,       //&&
   OR_TOKEN,        //||
   NOT_TOKEN,       //!
@@ -99,16 +99,16 @@ typedef enum {
   EXPRESION_TOKEN,    // expression
   UNDERSCORE_TOKEN,   // _
   PIPE_TOKEN,         //|
-  INTERP_START_TOKEN, // zacatek interpolace
-  INTERP_MID_TOKEN,   // prostredni cast interpolace
-  INTERP_END_TOKEN,   // konec interpolace
+  INTERP_START_TOKEN, // start of an interpolation
+  INTERP_MID_TOKEN,   // middle part of an interpolation
+  INTERP_END_TOKEN,   // end of an interpolation
 } Tokens;
 
 typedef struct {
-  Tokens type;         // typ tokenu
-  char *atribute;      // hodnota textu
-  int line;            // hlaseni chyb
-  bool check_new_line; // info ohledne konoveho radku
+  Tokens type;         // type of the token
+  char *atribute;      // text value
+  int line;            // used for error messages
+  bool check_new_line; // information about a new line
 } Token;
 
 #endif
