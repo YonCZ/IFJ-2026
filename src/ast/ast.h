@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: ast.h
- * Author: Pavel Novák (xnovakp01)
+ * Author: Pavel Novák [xnovakp01]
  */
 
 // input: Mám funkce v ast a chci abys mi udělal komentáře takové že budou
