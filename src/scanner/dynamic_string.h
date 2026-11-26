@@ -11,13 +11,13 @@
 typedef struct {
   // data
   char *data;
-  // delka
+  // length
   size_t len;
-  // kapacita
+  // capacity
   size_t cap;
 } DString;
 
-// funkce jsou popsane v dynamic_string
+// the functions are described in dynamic_string
 void ds_init(DString *s);
 void ds_free(DString *s);
 void ds_clear(DString *s);
