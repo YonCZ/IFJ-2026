@@ -13,22 +13,17 @@
 
 typedef struct {
   int label_counter;
-  char *function_name;
   DATA_TYPE return_type;
-}Gen;
-
-
-
+} Gen;
 
 /*
  *create from function name and label counter
  */
 int new_label(Gen *gen);
 
+void emit_string_literal(char *str);
 
-void emit_string_literal( char *str);
-
-void refactoring(AST_NODE *root);
+void gen_block_value(Gen *gen, AST_NODE *stmt, DATA_TYPE result);
 
 void push_to_val(AST_NODE *node);
 void pop_to_val(AST_NODE *node);
@@ -38,5 +33,5 @@ void pop_to_val(AST_NODE *node);
  *=============
  */
 bool is_builtin(const char *name);
-void builtin_call(Gen *gen, AST_NODE *call);
+void emit_builtin_call(Gen *gen, AST_NODE *call);
 void emit_builtins(Gen *gen, AST_NODE *root);

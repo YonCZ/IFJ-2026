@@ -1,10 +1,8 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g -Isrc
-SRC = $(wildcard src/*.c) $(wildcard src/*/*.c)
+SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
 TARGET = compiler
-
-all: build
 
 build: $(TARGET)
 
@@ -17,4 +15,4 @@ $(TARGET): $(OBJ)
 clean:
 	rm -f $(OBJ) $(TARGET)
 
-.PHONY: all build clean
+.PHONY: build clean
