@@ -1,7 +1,7 @@
 /*
  * IFJ26 Compiler
  * File: dynamic_string.h
- * Author: Polina Tihaninova [xtishap00]
+ * Author: Polina Tishaninova [xtishap00]
  */
 
 #ifndef DYNAMIC_STRING_H
