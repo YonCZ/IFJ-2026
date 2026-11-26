@@ -1,7 +1,7 @@
 /*
- * IFJ Implimentace prekladace
- * Soubor: parser.c
- * Autor: Tadeas Prikryl [xprikrt00]
+ * IFJ26 Compiler
+ * File: parser.c
+ * Author: Tadeáš Přikryl [xprikrt00]
  *
  * Prompt: "Precti si AGENTS.md, a na zaklade specifikace a zadani souboru,
  * udelej review meho kodu jestli splnuje vse co zadani pozaduje a jestli
