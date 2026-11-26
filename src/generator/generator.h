@@ -9,10 +9,6 @@
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
-/* The caller evaluates from left to right.
- *
- *main function
- */
 void generator_init(Gen *gen, AST_NODE *root);
 
 void gen_function(Gen *gen, AST_NODE *fn);
