@@ -1,10 +1,7 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler 
  * File: gen_stmt.c
- * Module: Generator
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
+ * Author: Pavel Novák [xnovakp01]
  */
 
 #include <stdio.h>
