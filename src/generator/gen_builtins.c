@@ -1,38 +1,8 @@
 /*
- * IFJ26 Compiler Implementation
- *
+ * IFJ26 Compiler
  * File: gen_builtins.c
- * Module: Generator
- * Author: Pavel Novák (xnovakp01)
- * Date: September 2026
- *
- * ---------------------------------------------------------------------------
- * Vestavěné funkce (kapitola 4 specifikace) napsal AI: Claude Sonnet 5.5
- * (Anthropic, claude-sonnet-5-5), 2026-11-18, na zadání Pavla Nováka
- * (xnovakp01). Prompt: "mohl by se je (builtins) vypsat do gen_builtins,
- * podepis se pod to a dej mi postup, jak to implementovat v těch ostatních
- * souborech" Zrevidoval a odevzdává: Pavel Novák (xnovakp01) Doplnění
- * 2026-11-19 (rozšíření VALMEM, funkce floor a volání lower_members): Claude
- * Sonnet 5.5, prompt "co mam delat pro rozsireni valmem". Ověřeno testem
- * test_generator (fáze 6) v simulátoru i v ic26int.
- * ---------------------------------------------------------------------------
- *
- * Jak to funguje
- *   Každá vestavěná funkce je v IFJcode26 napsaná jako obyčejná funkce s
- * návěštím $b_<jméno> a stejnou konvencí jako uživatelské funkce ($f_<jméno>):
- *     - volající vyhodnotí argumenty zleva doprava, takže poslední argument je
- * na zásobníku nahoře
- *     - CALL $b_<jméno>
- *     - funkce si sama udělá CREATEFRAME + PUSHFRAME, vyzvedne argumenty (POPS,
- * od posledního k prvnímu), a na konci nechá na zásobníku jednu hodnotu
- * (výsledek), POPFRAME a RETURN Definice vestavěných funkcí se vypisují až ZA
- * EXIT int@0 (jinak by se do nich program propadl). Vypíše se jen to, co
- * program opravdu volá (zjistí se průchodem AST).
- *
- *   toStr má tři varianty podle typu argumentu ($b_toStr_int, $b_toStr_float,
- * $b_toStr_bool); pro String se nevolá nic, hodnota na zásobníku už je řetězec.
+ * Author: Pavel Novák [xnovakp01]
  */
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,10 +11,6 @@
 #include "gen_internal.h"
 
 void lower_members(AST_NODE *fn); /*gen_valmem.c */
-
-/* ------------------------------------------------------------------------- */
-/*  Které vestavěné funkce existují a které program používá                  */
-/* ------------------------------------------------------------------------- */
 
 enum {
   B_READLINE,
@@ -56,9 +22,8 @@ enum {
   B_SUBSTR,
   B_ORD,
   B_CHR,
-  B_READBOOLEAN, /* rozšíření BOOLTHEN */
-  B_FLOOR, /* rozšíření VALMEM: člen .floor (interní jméno, aby se nepletlo s
-              uživatelskou funkcí) */
+  B_READBOOLEAN,
+  B_FLOOR,
   B_READINTMAYBE,
   B_READDOUBLEMAYBE,
   B_COUNT
@@ -71,12 +36,10 @@ static const char *const BUILTIN_NAME[B_COUNT] = {
     "readBoolean",    "$floor",  "readIntMaybe",
     "readDoubleMaybe"};
 
-/* kolikrát se v programu volá každá vestavěná funkce (jen zda vůbec: 0 nebo
- * víc) */
 static bool used[B_COUNT];
 static bool used_tostr_int, used_tostr_float, used_tostr_bool;
 
-// Najde index vestavěné funkce podle jména.
+//finds index in enum based on name
 static int builtin_index(const char *name) {
   for (int i = 0; i < B_COUNT; i++)
     if (strcmp(BUILTIN_NAME[i], name) == 0)
@@ -84,11 +47,9 @@ static int builtin_index(const char *name) {
   return -1;
 }
 
-/* Je to jméno vestavěné funkce? (print se tady nepočítá, ten generuje gen_expr
- * přímo) */
 bool is_builtin(const char *name) { return builtin_index(name) >= 0; }
 
-/* Projde celý strom a zapíše si, které vestavěné funkce se volají. */
+//goes through the AST and finds builtin function
 static void scan(AST_NODE *node) {
   if (!node)
     return;
@@ -108,7 +69,7 @@ static void scan(AST_NODE *node) {
           used_tostr_bool = true;
           break;
         default:
-          break; /* String: žádná funkce není potřeba */
+          break;
         }
       }
     }
@@ -138,12 +99,7 @@ static void scan(AST_NODE *node) {
   scan(node->next);
 }
 
-/* ------------------------------------------------------------------------- */
-/*  Volání                                                                   */
-/* ------------------------------------------------------------------------- */
-
-/* Vypíše samotné CALL vestavěné funkce. Argumenty už musí být na zásobníku
- * (gen_expr je vyhodnotil). */
+//print builtins call
 void emit_builtin_call(Gen *gen, AST_NODE *call) {
   (void)gen;
   if (strcmp(call->name, "toStr") == 0) {
@@ -170,19 +126,13 @@ void emit_builtin_call(Gen *gen, AST_NODE *call) {
       puts("PUSHS string@()");
       break;
     default:
-      break; /* String zůstává na zásobníku, jak je */
+      break;
     }
     return;
   }
   printf("CALL $b_%s\n", call->name);
 }
 
-/* ------------------------------------------------------------------------- */
-/*  Definice                                                                 */
-/* ------------------------------------------------------------------------- */
-
-/* readLine / readInt / readDouble: READ vrátí nil, když je řádek špatný nebo
- * skončil vstup. Podle zadání se pak vrací výchozí hodnota (0, 0.0, ""). */
 static void def_read(const char *name, const char *type,
                      const char *default_value) {
   printf("LABEL $b_%s\n", name);
@@ -198,7 +148,6 @@ static void def_read(const char *name, const char *type,
   puts("RETURN");
 }
 
-// Vygeneruje runtime pro readIntMaybe nebo readDoubleMaybe.
 static void def_readmaybe(const char *name, const char *type) {
   printf("LABEL $b_%s\n", name);
   puts("CREATEFRAME");
@@ -210,10 +159,6 @@ static void def_readmaybe(const char *name, const char *type) {
   puts("RETURN");
 }
 
-/* readBoolean (rozšíření BOOLTHEN): podle zadání odpovídá chování instrukce
- * READ, takže se výsledek READ nijak neupravuje (na rozdíl od readInt a
- * readDouble se nil nepřevádí na výchozí hodnotu). READ bool vrací true jen pro
- * řádek "true" a false jen pro "false"; cokoli jiného a konec vstupu je nil. */
 static void def_readboolean(void) {
   puts("LABEL $b_readBoolean");
   puts("CREATEFRAME");
@@ -225,8 +170,6 @@ static void def_readboolean(void) {
   puts("RETURN");
 }
 
-/* funkce s jedním argumentem a jednou instrukcí: výsledek = INSTRUKCE(argument)
- */
 static void def_unary(const char *label, const char *instruction) {
   printf("LABEL $b_%s\n", label);
   puts("CREATEFRAME");
@@ -240,10 +183,6 @@ static void def_unary(const char *label, const char *instruction) {
   puts("RETURN");
 }
 
-/* floor (rozšíření VALMEM, člen Double.floor): největší celé číslo, které není
- * větší než argument, ale jako Double. FLOAT2INT osekává k nule, takže u
- * záporných neceločíselných čísel je výsledek o 1 větší, než má být (-2.5 ->
- * -2); tehdy se 1.0 odečte. */
 static void def_floor(void) {
   puts("LABEL $b_$floor");
   puts("CREATEFRAME");
@@ -264,7 +203,6 @@ static void def_floor(void) {
   puts("RETURN");
 }
 
-/* toStr(Boolean): "true" nebo "false" */
 static void def_tostr_bool(void) {
   puts("LABEL $b_toStr_bool");
   puts("CREATEFRAME");
@@ -281,8 +219,7 @@ static void def_tostr_bool(void) {
   puts("RETURN");
 }
 
-/* ord(value, index): kód znaku na pozici index, nebo -1 (prázdný řetězec, index
- * mimo řetězec) */
+//finds code of char on index
 static void def_ord(void) {
   puts("LABEL $b_ord");
   puts("CREATEFRAME");
@@ -292,7 +229,7 @@ static void def_ord(void) {
   puts("DEFVAR LF@len");
   puts("DEFVAR LF@cond");
   puts("DEFVAR LF@res");
-  puts("POPS LF@idx"); /* poslední argument je nahoře */
+  puts("POPS LF@idx");
   puts("POPS LF@str");
   puts("STRLEN LF@len LF@str");
   puts("LT LF@cond LF@idx int@0");
@@ -310,8 +247,6 @@ static void def_ord(void) {
   puts("RETURN");
 }
 
-/* subStr(value, start, end): podřetězec od start (včetně) do end (bez); špatné
- * meze = chyba 40 */
 static void def_substr(void) {
   puts("LABEL $b_subStr");
   puts("CREATEFRAME");
@@ -324,26 +259,20 @@ static void def_substr(void) {
   puts("DEFVAR LF@res");
   puts("DEFVAR LF@ch");
   puts("DEFVAR LF@i");
-  puts("POPS LF@end"); /* poslední argument je nahoře */
+  puts("POPS LF@end");
   puts("POPS LF@start");
   puts("POPS LF@str");
   puts("STRLEN LF@len LF@str");
-  /* start < 0 */
   puts("LT LF@cond LF@start int@0");
   puts("JUMPIFEQ $b_subStr$err LF@cond bool@true");
-  /* end < 0 */
   puts("LT LF@cond LF@end int@0");
   puts("JUMPIFEQ $b_subStr$err LF@cond bool@true");
-  /* start > end */
   puts("GT LF@cond LF@start LF@end");
   puts("JUMPIFEQ $b_subStr$err LF@cond bool@true");
-  /* start >= délka (tedy NOT start < délka) */
   puts("LT LF@cond LF@start LF@len");
   puts("JUMPIFEQ $b_subStr$err LF@cond bool@false");
-  /* end > délka */
   puts("GT LF@cond LF@end LF@len");
   puts("JUMPIFEQ $b_subStr$err LF@cond bool@true");
-  /* cyklus: res = res + str[i] pro i od start do end - 1 */
   puts("MOVE LF@res string@");
   puts("MOVE LF@i LF@start");
   puts("LABEL $b_subStr$loop");
@@ -361,7 +290,7 @@ static void def_substr(void) {
   puts("EXIT int@40");
 }
 
-// Vygeneruje runtime pomocné funkce pro seznamy.
+//helper functions for lists
 static void def_list_helpers(void) {
   puts("LABEL $b_list_get");
   puts("CREATEFRAME");
@@ -844,15 +773,12 @@ static void def_list_helpers(void) {
   puts("RETURN");
 }
 
-/* Vypíše definice všech vestavěných funkcí, které program volá. Volá se z
- * generator_init hned za EXIT int@0 (a před nebo za definicemi uživatelských
- * funkcí, na pořadí nezáleží). */
+//writet defvar for builtins function
 void emit_builtins(Gen *gen, AST_NODE *root) {
   (void)gen;
   memset(used, 0, sizeof used);
   used_tostr_int = used_tostr_float = used_tostr_bool = false;
-  lower_members(root); /* VALMEM: x.toString apod. se přepíše na volání
-                          vestavěné funkce (gen_valmem.c) */
+  lower_members(root);
   scan(root);
 
   if (used[B_READLINE])
@@ -870,17 +796,17 @@ void emit_builtins(Gen *gen, AST_NODE *root) {
   if (used_tostr_int)
     def_unary("toStr_int", "INT2STR");
   if (used_tostr_float)
-    def_unary("toStr_float", "FLOAT2STR"); /* vždy %.2f, např. 2.50 */
+    def_unary("toStr_float", "FLOAT2STR");
   if (used_tostr_bool)
     def_tostr_bool();
   if (used[B_TOINT])
-    def_unary("toInt", "FLOAT2INT"); /* osekne k nule */
+    def_unary("toInt", "FLOAT2INT");
   if (used[B_FLOOR])
     def_floor();
   if (used[B_STRLENGTH])
     def_unary("strLength", "STRLEN");
   if (used[B_CHR])
-    def_unary("chr", "INT2CHAR"); /* mimo 0 až 127 skončí interpret chybou 58 */
+    def_unary("chr", "INT2CHAR");
   if (used[B_ORD])
     def_ord();
   if (used[B_SUBSTR])
